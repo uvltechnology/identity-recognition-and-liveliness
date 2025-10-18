@@ -9,3 +9,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .vscode/
+
+# Google Cloud service account keys
+google-cloud-key.json
+*.json
