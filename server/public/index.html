@@ -33,32 +33,18 @@
                         <canvas id="canvas" style="display: none;"></canvas>
 
                         <!-- Rectangle guide overlay -->
-                        <div class="overlay-container pointer-events-none absolute inset-0">
-                            <div class="guide-rectangle absolute inset-6 rounded-xl">
+                        <div class="overlay-container pointer-events-none absolute inset-0 flex items-center justify-center">
+                            <div class="guide-rectangle rounded-xl border-2 border-dashed border-white/70">
                                 <div class="corner top-left"></div>
                                 <div class="corner top-right"></div>
                                 <div class="corner bottom-left"></div>
                                 <div class="corner bottom-right"></div>
-                                <div class="guide-text absolute left-1/2 top-2 -translate-x-1/2 rounded bg-black/50 px-2 py-0.5 text-xs font-medium text-white">Position document here</div>
+                                <div class="guide-text absolute left-1/2 -bottom-10 -translate-x-1/2 rounded-lg bg-black/70 px-3 py-1.5 text-sm font-semibold text-white backdrop-blur-sm">Position document here</div>
                             </div>
 
                             <!-- Alignment feedback -->
-                            <div id="alignment-feedback" class="alignment-feedback absolute bottom-3 left-1/2 w-[92%] -translate-x-1/2 rounded-md bg-black/60 p-2 text-white">
-                                <div class="feedback-message text-center text-xs sm:text-sm">Center your document</div>
-                                <div class="feedback-indicators mt-2 grid grid-cols-3 gap-2 text-[10px] sm:text-xs">
-                                    <div class="indicator flex items-center justify-center gap-1 rounded bg-white/10 p-1" id="brightness-indicator">
-                                        <span class="icon">☀️</span>
-                                        <span class="label">Brightness</span>
-                                    </div>
-                                    <div class="indicator flex items-center justify-center gap-1 rounded bg-white/10 p-1" id="focus-indicator">
-                                        <span class="icon">🎯</span>
-                                        <span class="label">Focus</span>
-                                    </div>
-                                    <div class="indicator flex items-center justify-center gap-1 rounded bg-white/10 p-1" id="position-indicator">
-                                        <span class="icon">📐</span>
-                                        <span class="label">Position</span>
-                                    </div>
-                                </div>
+                            <div id="alignment-feedback" class="alignment-feedback absolute left-1/2 top-3 w-[94%] -translate-x-1/2 rounded-lg border border-white/20 bg-gradient-to-br from-black/80 to-black/70 px-3 py-2 shadow-2xl backdrop-blur-md">
+                                <div class="feedback-message text-center text-xs font-semibold tracking-wide text-white sm:text-sm">Center your document</div>
                             </div>
                         </div>
                     </div>

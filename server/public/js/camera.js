@@ -19,13 +19,29 @@ class CameraManager {
 
     setupEventListeners() {
         this.startBtn.addEventListener('click', () => this.startCamera());
-        this.captureBtn.addEventListener('click', () => this.captureImage());
+        this.captureBtn.addEventListener('click', () => {
+            this.showCaptureFlash();
+            this.captureImage();
+        });
         this.switchBtn.addEventListener('click', () => this.switchCamera());
         
         // Handle video metadata loaded
         this.video.addEventListener('loadedmetadata', () => {
             this.setupCanvas();
         });
+    }
+    
+    showCaptureFlash() {
+        // Visual feedback when capturing
+        const guideRect = document.querySelector('.guide-rectangle');
+        if (guideRect) {
+            guideRect.style.transition = 'none';
+            guideRect.style.backgroundColor = 'rgba(255, 255, 255, 0.6)';
+            setTimeout(() => {
+                guideRect.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+                guideRect.style.backgroundColor = 'transparent';
+            }, 150);
+        }
     }
 
     async getAvailableCameras() {
@@ -139,21 +155,150 @@ class CameraManager {
         // Ensure canvas is properly sized
         this.setupCanvas();
 
-        // Draw video frame to canvas
+        // Draw full video frame to canvas first
         this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
 
-        // Get image data
-        const imageDataUrl = this.canvas.toDataURL('image/jpeg', 0.9);
+        // Get the cropped rectangle area
+        const croppedImageDataUrl = this.getCroppedRectangleArea();
         
         // Display preview
-        this.displayPreview(imageDataUrl);
+        this.displayPreview(croppedImageDataUrl);
 
         // Trigger OCR processing
         if (window.ocrProcessor) {
-            window.ocrProcessor.processImageData(imageDataUrl);
+            window.ocrProcessor.processImageData(croppedImageDataUrl);
         }
 
-        return imageDataUrl;
+        return croppedImageDataUrl;
+    }
+
+    getCroppedRectangleArea() {
+        // Get guide rectangle element and video element
+        const guideRect = document.querySelector('.guide-rectangle');
+        const videoElement = this.video;
+        const videoContainer = videoElement.parentElement;
+        
+        // Get the actual bounding rectangles
+        const containerRect = videoContainer.getBoundingClientRect();
+        const guideRectBounds = guideRect.getBoundingClientRect();
+        
+        // Get actual video dimensions (source resolution)
+        const videoWidth = this.canvas.width;
+        const videoHeight = this.canvas.height;
+        
+        // Get displayed video dimensions
+        const displayWidth = containerRect.width;
+        const displayHeight = containerRect.height;
+        
+        // Calculate how the video is being displayed (object-fit: cover)
+        // The video might be cropped to fill the container
+        let sourceX = 0, sourceY = 0, sourceWidth = videoWidth, sourceHeight = videoHeight;
+        
+        const videoAspect = videoWidth / videoHeight;
+        const containerAspect = displayWidth / displayHeight;
+        
+        if (videoAspect > containerAspect) {
+            // Video is wider - sides are cropped
+            sourceWidth = videoHeight * containerAspect;
+            sourceX = (videoWidth - sourceWidth) / 2;
+        } else {
+            // Video is taller - top/bottom are cropped
+            sourceHeight = videoWidth / containerAspect;
+            sourceY = (videoHeight - sourceHeight) / 2;
+        }
+        
+        // Calculate rectangle position relative to container
+        const rectLeft = guideRectBounds.left - containerRect.left;
+        const rectTop = guideRectBounds.top - containerRect.top;
+        const rectWidth = guideRectBounds.width;
+        const rectHeight = guideRectBounds.height;
+        
+        // Calculate scale from display to source
+        const scaleX = sourceWidth / displayWidth;
+        const scaleY = sourceHeight / displayHeight;
+        
+        // Calculate crop coordinates in source video
+        const cropX = Math.floor(sourceX + (rectLeft * scaleX));
+        const cropY = Math.floor(sourceY + (rectTop * scaleY));
+        const cropWidth = Math.floor(rectWidth * scaleX);
+        const cropHeight = Math.floor(rectHeight * scaleY);
+        
+        // Ensure crop is within bounds
+        const finalCropX = Math.max(0, Math.min(cropX, videoWidth - 1));
+        const finalCropY = Math.max(0, Math.min(cropY, videoHeight - 1));
+        const finalCropWidth = Math.min(cropWidth, videoWidth - finalCropX);
+        const finalCropHeight = Math.min(cropHeight, videoHeight - finalCropY);
+        
+        console.log('Crop Info:', {
+            video: { width: videoWidth, height: videoHeight },
+            display: { width: displayWidth, height: displayHeight },
+            source: { x: sourceX, y: sourceY, width: sourceWidth, height: sourceHeight },
+            crop: { x: finalCropX, y: finalCropY, width: finalCropWidth, height: finalCropHeight },
+            rectangle: { left: rectLeft, top: rectTop, width: rectWidth, height: rectHeight }
+        });
+        
+        // Get the cropped image data
+        const croppedImageData = this.ctx.getImageData(
+            finalCropX, 
+            finalCropY, 
+            finalCropWidth, 
+            finalCropHeight
+        );
+        
+        // Create a new canvas for the cropped image
+        const croppedCanvas = document.createElement('canvas');
+        croppedCanvas.width = finalCropWidth;
+        croppedCanvas.height = finalCropHeight;
+        const croppedCtx = croppedCanvas.getContext('2d', { 
+            alpha: false,
+            desynchronized: true 
+        });
+        
+        // Put the cropped image data onto the new canvas
+        croppedCtx.putImageData(croppedImageData, 0, 0);
+        
+        // Apply sharpening filter for better readability
+        this.sharpenImage(croppedCtx, finalCropWidth, finalCropHeight);
+        
+        // Convert to data URL with maximum quality for OCR readability
+        return croppedCanvas.toDataURL('image/jpeg', 1.0);
+    }
+    
+    sharpenImage(ctx, width, height) {
+        // Get image data
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const data = imageData.data;
+        
+        // Create a copy for processing
+        const copy = new Uint8ClampedArray(data);
+        
+        // Sharpening kernel
+        const kernel = [
+            0, -1, 0,
+            -1, 5, -1,
+            0, -1, 0
+        ];
+        
+        // Apply sharpening (simple convolution)
+        for (let y = 1; y < height - 1; y++) {
+            for (let x = 1; x < width - 1; x++) {
+                for (let c = 0; c < 3; c++) { // RGB channels only
+                    let sum = 0;
+                    for (let ky = -1; ky <= 1; ky++) {
+                        for (let kx = -1; kx <= 1; kx++) {
+                            const idx = ((y + ky) * width + (x + kx)) * 4 + c;
+                            const kernelIdx = (ky + 1) * 3 + (kx + 1);
+                            sum += copy[idx] * kernel[kernelIdx];
+                        }
+                    }
+                    const idx = (y * width + x) * 4 + c;
+                    data[idx] = Math.max(0, Math.min(255, sum));
+                }
+            }
+        }
+        
+        // Put sharpened image back
+        ctx.putImageData(imageData, 0, 0);
     }
 
     displayPreview(imageDataUrl) {

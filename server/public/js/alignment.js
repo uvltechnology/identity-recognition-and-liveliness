@@ -5,6 +5,13 @@ class AlignmentChecker {
         this.lastFrameTime = 0;
         this.frameRate = 10; // Check 10 times per second
         
+        // Auto-capture countdown
+        this.autoCaptureEnabled = true;
+        this.autoCaptureCountdown = 0;
+        this.autoCaptureTarget = 3; // 3 seconds
+        this.lastStatus = null;
+        this.countdownInterval = null;
+        
         this.initializeElements();
         this.setupThresholds();
     }
@@ -12,10 +19,7 @@ class AlignmentChecker {
     initializeElements() {
         this.guideRectangle = document.querySelector('.guide-rectangle');
         this.feedbackContainer = document.getElementById('alignment-feedback');
-        this.feedbackMessage = this.feedbackContainer.querySelector('.feedback-message');
-        this.brightnessIndicator = document.getElementById('brightness-indicator');
-        this.focusIndicator = document.getElementById('focus-indicator');
-        this.positionIndicator = document.getElementById('position-indicator');
+        this.feedbackMessage = this.feedbackContainer?.querySelector('.feedback-message');
     }
 
     setupThresholds() {
@@ -44,6 +48,9 @@ class AlignmentChecker {
             this.performAlignmentCheck();
         }, 1000 / this.frameRate);
         
+        // Reset countdown when starting
+        this.resetCountdown();
+        
         console.log('Alignment checking started');
     }
 
@@ -56,8 +63,73 @@ class AlignmentChecker {
             this.checkInterval = null;
         }
         
+        this.resetCountdown();
         this.resetFeedback();
         console.log('Alignment checking stopped');
+    }
+    
+    resetCountdown() {
+        this.autoCaptureCountdown = 0;
+        this.lastStatus = null;
+        if (this.countdownInterval) {
+            clearInterval(this.countdownInterval);
+            this.countdownInterval = null;
+        }
+    }
+    
+    startCountdown() {
+        if (this.countdownInterval) return; // Already counting
+        
+        this.autoCaptureCountdown = this.autoCaptureTarget;
+        
+        this.countdownInterval = setInterval(() => {
+            this.autoCaptureCountdown--;
+            
+            if (this.autoCaptureCountdown <= 0) {
+                this.performAutoCapture();
+                this.resetCountdown();
+            } else {
+                // Update UI with countdown
+                this.updateCountdownUI();
+            }
+        }, 1000);
+        
+        this.updateCountdownUI();
+    }
+    
+    performAutoCapture() {
+        console.log('Auto-capturing image...');
+        
+        // Trigger capture through camera manager
+        if (window.cameraManager && window.cameraManager.isActive()) {
+            window.cameraManager.captureImage();
+            
+            // Visual feedback
+            if (this.feedbackMessage) {
+                const originalMessage = this.feedbackMessage.textContent;
+                this.feedbackMessage.textContent = '✓ Image captured!';
+                
+                setTimeout(() => {
+                    this.feedbackMessage.textContent = originalMessage;
+                }, 2000);
+            }
+        }
+    }
+    
+    updateCountdownUI() {
+        if (this.feedbackMessage) {
+            this.feedbackMessage.textContent = `Auto-capturing in ${this.autoCaptureCountdown}...`;
+            this.feedbackMessage.style.color = '#4CAF50';
+        }
+        
+        // Update guide text
+        const guideText = this.guideRectangle?.querySelector('.guide-text');
+        if (guideText) {
+            guideText.textContent = `${this.autoCaptureCountdown}...`;
+            guideText.style.color = '#4CAF50';
+            guideText.style.fontSize = '1.5rem';
+            guideText.style.fontWeight = '700';
+        }
     }
 
     performAlignmentCheck() {
@@ -222,27 +294,23 @@ class AlignmentChecker {
     }
 
     updateFeedback(checks) {
-        // Update individual indicators
-        this.updateIndicator(this.brightnessIndicator, checks.brightness);
-        this.updateIndicator(this.focusIndicator, checks.focus);
-        this.updateIndicator(this.positionIndicator, checks.position);
-        
         // Update overall feedback message and guide rectangle
         const overallStatus = this.calculateOverallStatus(checks);
-        this.updateOverallFeedback(overallStatus, checks);
-    }
-
-    updateIndicator(indicator, check) {
-        // Remove existing status classes
-        indicator.classList.remove('good', 'warning', 'error');
         
-        // Add new status class
-        indicator.classList.add(check.status);
+        // Check if status changed - if so, reset countdown
+        if (this.lastStatus !== overallStatus) {
+            this.resetCountdown();
+            this.lastStatus = overallStatus;
+            
+            // Start countdown if status is good
+            if (overallStatus === 'good' && this.autoCaptureEnabled) {
+                this.startCountdown();
+            }
+        }
         
-        // Update label if needed
-        const label = indicator.querySelector('.label');
-        if (label && check.message) {
-            label.textContent = check.message.split(' ')[0]; // First word only for space
+        // Only update UI if not in countdown mode
+        if (this.autoCaptureCountdown === 0 || overallStatus !== 'good') {
+            this.updateOverallFeedback(overallStatus, checks);
         }
     }
 
@@ -259,8 +327,9 @@ class AlignmentChecker {
     }
 
     updateOverallFeedback(status, checks) {
-        // Update guide rectangle outline color using explicit status classes
+        // Update guide rectangle appearance with new status classes
         this.guideRectangle.classList.remove('status-good', 'status-warning', 'status-error');
+        
         if (status === 'good') {
             this.guideRectangle.classList.add('status-good');
         } else if (status === 'warning') {
@@ -269,7 +338,7 @@ class AlignmentChecker {
             this.guideRectangle.classList.add('status-error');
         }
         
-        // Update feedback message
+        // Update feedback message with color coding
         let message = '';
         const errorChecks = Object.values(checks).filter(check => check.status === 'error');
         const warningChecks = Object.values(checks).filter(check => check.status === 'warning');
@@ -282,35 +351,56 @@ class AlignmentChecker {
             message = 'Perfect! Ready to capture';
         }
         
-        this.feedbackMessage.textContent = message;
+        if (this.feedbackMessage) {
+            this.feedbackMessage.textContent = message;
+            
+            // Color code the message based on status
+            if (status === 'good') {
+                this.feedbackMessage.style.color = '#4CAF50';
+            } else if (status === 'error') {
+                this.feedbackMessage.style.color = '#F44336';
+            } else {
+                this.feedbackMessage.style.color = '#FFC107';
+            }
+        }
         
         // Update guide text
         const guideText = this.guideRectangle.querySelector('.guide-text');
-        if (status === 'good') {
-            guideText.textContent = 'Ready to capture!';
-            guideText.style.color = '#4CAF50';
-        } else {
-            guideText.textContent = 'Position document here';
-            guideText.style.color = 'white';
+        if (guideText) {
+            if (status === 'good') {
+                guideText.textContent = 'Ready to capture!';
+                guideText.style.color = '#4CAF50';
+                guideText.style.fontSize = '';
+                guideText.style.fontWeight = '';
+            } else if (status === 'error') {
+                guideText.textContent = 'Adjust camera';
+                guideText.style.color = '#F44336';
+                guideText.style.fontSize = '';
+                guideText.style.fontWeight = '';
+            } else {
+                guideText.textContent = 'Position document here';
+                guideText.style.color = '#FFC107';
+                guideText.style.fontSize = '';
+                guideText.style.fontWeight = '';
+            }
         }
     }
 
     resetFeedback() {
-        // Reset all indicators
-        [this.brightnessIndicator, this.focusIndicator, this.positionIndicator].forEach(indicator => {
-            indicator.classList.remove('good', 'warning', 'error');
-        });
-        
-    // Reset guide rectangle
-    this.guideRectangle.classList.remove('status-good', 'status-warning', 'status-error');
+        // Reset guide rectangle to default (white border)
+        this.guideRectangle.classList.remove('status-good', 'status-warning', 'status-error');
         
         // Reset feedback message
-        this.feedbackMessage.textContent = 'Center your document';
+        if (this.feedbackMessage) {
+            this.feedbackMessage.textContent = 'Center your document';
+        }
         
         // Reset guide text
         const guideText = this.guideRectangle.querySelector('.guide-text');
-        guideText.textContent = 'Position document here';
-        guideText.style.color = 'white';
+        if (guideText) {
+            guideText.textContent = 'Position document here';
+            guideText.style.color = 'white';
+        }
     }
 }
 

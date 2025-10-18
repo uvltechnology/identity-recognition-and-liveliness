@@ -55,6 +55,7 @@ main {
 
 .camera-container {
     position: relative;
+    background: #000;
     border-radius: 10px;
     overflow: hidden;
     aspect-ratio: 4/3;
@@ -77,151 +78,199 @@ main {
     pointer-events: none;
 }
 
-/* Rectangle Guide */
+/* Rectangle Guide - Professional Mobile-Optimized */
 .guide-rectangle {
-    /* The element is positioned via Tailwind classes in HTML; here we only style the outline */
-    border-width: 3px !important; /* override Tailwind border-2 if present */
-    border-style: dashed !important;
-    border-color: rgba(255, 255, 255, 0.6) !important; /* default neutral */
-    border-radius: 12px;
-    background: transparent !important; /* fully transparent interior */
-    transition: border-color 0.25s ease, box-shadow 0.25s ease;
-}
-
-/* Dynamic status colors (good/ok, warning, error) */
-.guide-rectangle.status-good {
-    border-color: #22c55e !important; /* Tailwind green-500 */
-    box-shadow: 0 0 18px rgba(34, 197, 94, 0.35);
-}
-
-.guide-rectangle.status-warning {
-    border-color: #f59e0b !important; /* amber-500 */
-    box-shadow: 0 0 14px rgba(245, 158, 11, 0.3);
-}
-
-.guide-rectangle.status-error {
-    border-color: #ef4444 !important; /* red-500 */
-    animation: pulse 1s infinite;
-    box-shadow: 0 0 14px rgba(239, 68, 68, 0.35);
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 0.8; }
-    50% { opacity: 1; }
-}
-
-/* Corner indicators */
-.corner {
-    position: absolute;
-    width: 20px;
-    height: 20px;
-    border: 3px solid white;
-}
-
-.corner.top-left {
-    top: -3px;
-    left: -3px;
-    border-right: none;
-    border-bottom: none;
-    border-top-left-radius: 10px;
-}
-
-.corner.top-right {
-    top: -3px;
-    right: -3px;
-    border-left: none;
-    border-bottom: none;
-    border-top-right-radius: 10px;
-}
-
-.corner.bottom-left {
-    bottom: -3px;
-    left: -3px;
-    border-right: none;
-    border-top: none;
-    border-bottom-left-radius: 10px;
-}
-
-.corner.bottom-right {
-    bottom: -3px;
-    right: -3px;
-    border-left: none;
-    border-top: none;
-    border-bottom-right-radius: 10px;
-}
-
-.guide-text {
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    color: white;
-    font-weight: bold;
-    text-shadow: 2px 2px 4px rgba(0,0,0,0.7);
-    font-size: 1.1rem;
-    text-align: center;
-    opacity: 0.9;
+    width: 85%;
+    height: 65%;
+    border: 3px solid rgba(255, 255, 255, 0.7);
+    border-radius: 12px;
+    background: transparent;
+    backdrop-filter: none;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4);
 }
 
-/* Alignment Feedback */
-.alignment-feedback {
+@media (min-width: 640px) {
+    .guide-rectangle {
+        width: 75%;
+        height: 60%;
+    }
+}
+
+@media (min-width: 1024px) {
+    .guide-rectangle {
+        width: 70%;
+    }
+}
+
+/* Green border - everything is OK */
+.guide-rectangle.status-good {
+    border-color: #4CAF50;
+    border-width: 4px;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.3),
+                inset 0 0 30px rgba(76, 175, 80, 0.15),
+                0 0 25px rgba(76, 175, 80, 0.7);
+}
+
+/* Yellow border - warning (adjust lighting, focus, position) */
+.guide-rectangle.status-warning {
+    border-color: #FFC107;
+    border-width: 4px;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4),
+                inset 0 0 30px rgba(255, 193, 7, 0.15),
+                0 0 25px rgba(255, 193, 7, 0.7);
+    animation: pulse-warning 2s ease-in-out infinite;
+}
+
+/* Red border - error (too dark, blurred, too far, not readable) */
+.guide-rectangle.status-error {
+    border-color: #F44336;
+    border-width: 4px;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5),
+                inset 0 0 30px rgba(244, 67, 54, 0.15),
+                0 0 25px rgba(244, 67, 54, 0.7);
+    animation: pulse-error 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-warning {
+    0%, 100% { 
+        opacity: 0.85;
+        box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4),
+                    inset 0 0 30px rgba(255, 193, 7, 0.15),
+                    0 0 20px rgba(255, 193, 7, 0.6);
+    }
+    50% { 
+        opacity: 1;
+        box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4),
+                    inset 0 0 30px rgba(255, 193, 7, 0.25),
+                    0 0 35px rgba(255, 193, 7, 0.9);
+    }
+}
+
+@keyframes pulse-error {
+    0%, 100% { 
+        opacity: 0.8;
+        box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5),
+                    inset 0 0 30px rgba(244, 67, 54, 0.15),
+                    0 0 20px rgba(244, 67, 54, 0.6);
+    }
+    50% { 
+        opacity: 1;
+        box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5),
+                    inset 0 0 30px rgba(244, 67, 54, 0.25),
+                    0 0 35px rgba(244, 67, 54, 0.9);
+    }
+}
+
+/* Corner indicators - Mobile-optimized with shadow */
+.corner {
     position: absolute;
-    top: 10px;
-    left: 10px;
-    right: 10px;
-    background: rgba(0, 0, 0, 0.8);
+    width: 24px;
+    height: 24px;
+    border: 4px solid rgba(255, 255, 255, 0.8);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
+
+@media (max-width: 639px) {
+    .corner {
+        width: 20px;
+        height: 20px;
+        border-width: 3px;
+    }
+}
+
+.corner.top-left {
+    top: -4px;
+    left: -4px;
+    border-right: none;
+    border-bottom: none;
+    border-top-left-radius: 12px;
+}
+
+.corner.top-right {
+    top: -4px;
+    right: -4px;
+    border-left: none;
+    border-bottom: none;
+    border-top-right-radius: 12px;
+}
+
+.corner.bottom-left {
+    bottom: -4px;
+    left: -4px;
+    border-right: none;
+    border-top: none;
+    border-bottom-left-radius: 12px;
+}
+
+.corner.bottom-right {
+    bottom: -4px;
+    right: -4px;
+    border-left: none;
+    border-top: none;
+    border-bottom-right-radius: 12px;
+}
+
+/* Corner colors match guide rectangle status */
+.guide-rectangle.status-good .corner {
+    border-color: #4CAF50;
+    filter: drop-shadow(0 0 8px rgba(76, 175, 80, 0.8));
+}
+
+.guide-rectangle.status-warning .corner {
+    border-color: #FFC107;
+    filter: drop-shadow(0 0 8px rgba(255, 193, 7, 0.8));
+}
+
+.guide-rectangle.status-error .corner {
+    border-color: #F44336;
+    filter: drop-shadow(0 0 8px rgba(244, 67, 54, 0.8));
+}
+
+.guide-text {
+    position: absolute;
+    bottom: -40px;
+    left: 50%;
+    transform: translateX(-50%);
     color: white;
-    padding: 15px;
-    border-radius: 8px;
-    backdrop-filter: blur(10px);
-}
-
-.feedback-message {
-    font-size: 1rem;
-    font-weight: bold;
-    margin-bottom: 10px;
+    font-weight: 600;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+    font-size: 0.875rem;
     text-align: center;
+    opacity: 0.95;
+    letter-spacing: 0.05em;
+    padding: 6px 16px;
+    background: rgba(0, 0, 0, 0.7);
+    border-radius: 8px;
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: all 0.3s ease;
+    white-space: nowrap;
+    z-index: 15;
 }
 
-.feedback-indicators {
-    display: flex;
-    justify-content: space-around;
-    gap: 10px;
+@media (max-width: 639px) {
+    .guide-text {
+        font-size: 0.8rem;
+        padding: 5px 14px;
+        bottom: -36px;
+    }
 }
 
-.indicator {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 5px;
-    flex: 1;
-    padding: 8px;
-    border-radius: 5px;
+/* Alignment Feedback - Professional Mobile-First Design */
+.alignment-feedback {
+    z-index: 20;
     transition: all 0.3s ease;
 }
 
-.indicator.good {
-    background: rgba(76, 175, 80, 0.3);
-    border: 1px solid #4CAF50;
-}
-
-.indicator.warning {
-    background: rgba(255, 152, 0, 0.3);
-    border: 1px solid #FF9800;
-}
-
-.indicator.error {
-    background: rgba(244, 67, 54, 0.3);
-    border: 1px solid #F44336;
-}
-
-.indicator .icon {
-    font-size: 1.2rem;
-}
-
-.indicator .label {
-    font-size: 0.8rem;
-    text-align: center;
+.feedback-message {
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    transition: color 0.3s ease;
 }
 
 /* Controls */
