@@ -8,7 +8,7 @@ class AlignmentChecker {
         // Auto-capture countdown
         this.autoCaptureEnabled = true;
         this.autoCaptureCountdown = 0;
-        this.autoCaptureTarget = 3; // 3 seconds
+        this.autoCaptureTarget = 2; // 2 seconds
         this.lastStatus = null;
         this.countdownInterval = null;
         
