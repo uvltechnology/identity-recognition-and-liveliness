@@ -142,17 +142,32 @@ class OCRProcessor {
         if (result.fields) {
             const fieldsSection = this.createFieldsSection(result.fields);
             container.appendChild(fieldsSection);
+
+            // Also try to populate the details form from server-side extracted fields
+            this.fillDetailsForm({
+                idType: 'national-id',
+                firstName: result?.fields?.firstName,
+                lastName: result?.fields?.lastName,
+                birthDate: result?.fields?.birthDate,
+                idNumber: result?.fields?.idNumber,
+            });
         }
 
         // Identity document results (combines basic and structured)
         if (result.basicText && result.basicText.text) {
             const basicSection = this.createResultSection('Basic Text Extraction', result.basicText.text);
             container.appendChild(basicSection);
+
+            // Client-side parsing based on provided label rules for PH National ID
+            this.parseAndFillFromRawText(result.basicText.text);
         }
 
         if (result.structuredText && result.structuredText.text) {
             const structuredSection = this.createResultSection('Structured Text', result.structuredText.text);
             container.appendChild(structuredSection);
+
+            // Attempt parsing from structured text as well (fallback/merge)
+            this.parseAndFillFromRawText(result.structuredText.text);
         }
 
         if (result.basicText && result.basicText.words && result.basicText.words.length > 0) {
@@ -161,6 +176,9 @@ class OCRProcessor {
                 this.formatWordsList(result.basicText.words)
             );
             container.appendChild(wordsSection);
+
+            // Priority fill: Use specific word indices per request
+            this.fillFromWordIndices(result.basicText.words);
         }
 
         // Processing info
@@ -170,6 +188,260 @@ class OCRProcessor {
                 `Processed at: ${new Date(result.processedAt).toLocaleString()}`
             );
             container.appendChild(infoSection);
+        }
+    }
+
+    // Fill fields using fixed 1-based word indices from OCR results
+    fillFromWordIndices(words) {
+        if (!Array.isArray(words) || words.length === 0) return;
+
+        const getWord = (idx1Based) => {
+            const i = idx1Based - 1;
+            if (i < 0 || i >= words.length) return '';
+            const t = (words[i]?.text || '').toString().trim();
+            return t;
+        };
+
+        // Map indices
+        const idNumberRaw = getWord(13);
+        let lastNameRaw = getWord(22);
+        // Special condition: If word 22 is 'Mga', use word 21 as last name
+        if ((getWord(22) || '').toLowerCase() === 'mga') {
+            const candidate = getWord(21);
+            if (candidate) {
+                lastNameRaw = candidate;
+            }
+        } else {
+            // Optional robustness: if word 22 is part of a label and neighboring tokens look like labels
+            const w21 = (getWord(21) || '').toLowerCase();
+            const w23 = (getWord(23) || '').toLowerCase();
+            const looksLikeLabel = (txt) => /^(last|name|mga|pangalan|given)$/.test(txt);
+            if (looksLikeLabel((lastNameRaw || '').toLowerCase()) && !looksLikeLabel(w21)) {
+                // Prefer a non-label neighbor as the surname
+                lastNameRaw = getWord(21) || lastNameRaw;
+            }
+            if (looksLikeLabel((lastNameRaw || '').toLowerCase()) && !looksLikeLabel(w23)) {
+                // If previous didn't work, try next
+                lastNameRaw = getWord(23) || lastNameRaw;
+            }
+        }
+        let firstNameRaw = getWord(28);
+        // Special condition: If word 28 is 'Gitnang', use word 27 as first name
+        if ((getWord(28) || '').toLowerCase() === 'gitnang') {
+            const candidate = getWord(27);
+            if (candidate) {
+                firstNameRaw = candidate;
+            }
+        }
+        const birthMonthRaw = getWord(42);
+        const birthDayRaw = getWord(43);
+        const birthYearRaw = getWord(45);
+
+        // Clean and normalize
+        const cleanAlnum = (s) => (s || '').replace(/[^A-Za-z0-9\-]/g, '').trim();
+        const cleanWord = (s) => (s || '').replace(/[,:;]+$/g, '').trim();
+
+        const idNumber = cleanAlnum(idNumberRaw);
+        const lastName = cleanWord(lastNameRaw);
+        const firstName = cleanWord(firstNameRaw);
+
+        const monthNum = this.monthToNumber(birthMonthRaw) || (/(^\d{1,2}$)/.test(birthMonthRaw) ? String(birthMonthRaw).padStart(2, '0') : null);
+        const dayNum = (/^\d{1,2}$/.test(birthDayRaw) ? String(birthDayRaw).padStart(2, '0') : birthDayRaw.match(/\d{1,2}/)?.[0]?.padStart(2, '0')) || null;
+        let yearNum = null;
+        if (/^\d{4}$/.test(birthYearRaw)) {
+            yearNum = birthYearRaw;
+        } else if (/^\d{2}$/.test(birthYearRaw)) {
+            // Assume 19xx for >30 and 20xx for <=30
+            const yy = parseInt(birthYearRaw, 10);
+            yearNum = (yy <= 30 ? 2000 + yy : 1900 + yy).toString();
+        } else {
+            const y = birthYearRaw.match(/(19|20)\d{2}/)?.[0];
+            if (y) yearNum = y;
+        }
+
+        // Compose birth date if possible
+        let birthDateISO = null;
+        if (yearNum && monthNum && dayNum) {
+            birthDateISO = `${yearNum}-${monthNum}-${dayNum}`;
+        }
+
+        // Apply to form (overwrite if values exist; per requirement, use these indices to determine data)
+        this.fillDetailsForm({
+            idType: 'national-id',
+            firstName: firstName || undefined,
+            lastName: lastName || undefined,
+            birthDate: birthDateISO || undefined,
+            idNumber: idNumber || undefined,
+        });
+
+        // Log for debugging
+        console.log('[WordIndex Extraction]', {
+            idNumberRaw, lastNameRaw, firstNameRaw, birthMonthRaw, birthDayRaw, birthYearRaw,
+            idNumber, lastName, firstName, birthDateISO
+        });
+    }
+
+    // Parse OCR text to extract specific PH National ID fields
+    parseAndFillFromRawText(text) {
+        if (!text) return;
+
+        const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+        const setIfEmpty = (el, val) => {
+            if (!el) return;
+            if (!el.value && val) el.value = val;
+        };
+
+        // Normalize
+        const raw = text.replace(/\u0000/g, ' ').trim();
+        const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        const lowerJoined = raw.toLowerCase();
+
+        // Last Name: from "Apelyido" or "Last Name"
+        let lastName;
+        for (const line of lines) {
+            const l = line.toLowerCase();
+            if (/\b(apelyido|last\s*name)\b/.test(l)) {
+                const after = line.split(/:|\-|–|—/).slice(1).join(':') || line.replace(/.*?(apelyido|last\s*name)\b[:\s-]*/i, '');
+                lastName = clean(after) || undefined;
+                // Remove extra tokens that might trail
+                if (lastName && /\b(mga\s+pangalan|given\s+names?)\b/i.test(lastName)) {
+                    lastName = lastName.replace(/\b(mga\s+pangalan|given\s+names?)\b.*$/i, '').trim();
+                }
+                break;
+            }
+        }
+
+        // First Name: from "Mga Pangalan" or "Given Names"
+        let firstName;
+        for (const line of lines) {
+            const l = line.toLowerCase();
+            if (/\b(mga\s+pangalan|given\s+names?)\b/.test(l)) {
+                const after = line.split(/:|\-|–|—/).slice(1).join(':') || line.replace(/.*?(mga\s+pangalan|given\s+names?)\b[:\s-]*/i, '');
+                firstName = clean(after) || undefined;
+                break;
+            }
+        }
+
+        // Birth Date: get text appearing after "Petsa ng Kapanganakan/Date of Birth"
+        let birthDate;
+        {
+            const rx = /(petsa\s+ng\s+kapanganakan\s*\/\s*date\s+of\s+birth)[:\s-]*([A-Za-z0-9 ,\/\-.]+)/i;
+            const m = raw.match(rx);
+            if (m) {
+                const tail = clean(m[2]);
+                // Try to parse common date formats to YYYY-MM-DD
+                const parsed = this.normalizeDate(tail);
+                birthDate = parsed || tail;
+            } else {
+                // Try individual label presence
+                const rx2 = /(petsa\s+ng\s+kapanganakan|date\s+of\s+birth)[:\s-]*([A-Za-z0-9 ,\/\-.]+)/i;
+                const m2 = raw.match(rx2);
+                if (m2) {
+                    const tail2 = clean(m2[2]);
+                    birthDate = this.normalizeDate(tail2) || tail2;
+                }
+            }
+        }
+
+        // ID Number: after mention of "Philippine Identification Card" next number found
+        let idNumber;
+        {
+            const idx = lowerJoined.indexOf('philippine identification card');
+            if (idx !== -1) {
+                const after = raw.slice(idx + 'philippine identification card'.length);
+                const num = after.match(/([A-Z0-9][A-Z0-9\- ]{4,})/i);
+                if (num) {
+                    idNumber = clean(num[1]).replace(/\s+/g, '');
+                }
+            }
+            // fallback: look for CRN pattern or general number
+            if (!idNumber) {
+                const crn = raw.match(/\bCRN[:\s-]*([0-9\- ]{8,})/i);
+                if (crn) idNumber = clean(crn[1]).replace(/\s+/g, '');
+            }
+        }
+
+        // Fill form fields if present
+        const idTypeEl = document.getElementById('id-type');
+        const idNumEl = document.getElementById('id-number');
+        const fnEl = document.getElementById('first-name');
+        const lnEl = document.getElementById('last-name');
+        const bdEl = document.getElementById('birth-date');
+
+        if (idTypeEl) idTypeEl.value = 'national-id';
+        setIfEmpty(lnEl, lastName);
+        setIfEmpty(fnEl, firstName);
+        // If birthDate is in human text, try normalize again for input[type=date]
+        if (bdEl && !bdEl.value && birthDate) {
+            const iso = this.normalizeDate(birthDate);
+            bdEl.value = iso || '';
+        }
+        setIfEmpty(idNumEl, idNumber);
+    }
+
+    normalizeDate(s) {
+        if (!s) return null;
+        const str = s.trim();
+        // Try YYYY-MM-DD
+        let m = str.match(/\b(20\d{2}|19\d{2})[-/.](0[1-9]|1[0-2])[-/.](0[1-9]|[12]\d|3[01])\b/);
+        if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+        // Try DD/MM/YYYY or DD-MM-YYYY
+        m = str.match(/\b(0[1-9]|[12]\d|3[01])[\/\-](0[1-9]|1[0-2])[\/\-]((?:19|20)\d{2})\b/);
+        if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+        // Try MM/DD/YYYY
+        m = str.match(/\b(0[1-9]|1[0-2])[\/\-](0[1-9]|[12]\d|3[01])[\/\-]((?:19|20)\d{2})\b/);
+        if (m) return `${m[3]}-${m[1]}-${m[2]}`;
+        // Try DD Mon YYYY
+        m = str.match(/\b(0[1-9]|[12]\d|3[01])\s+([A-Za-z]{3,})\s+((?:19|20)\d{2})\b/);
+        if (m) {
+            const day = m[1].padStart(2, '0');
+            const month = this.monthToNumber(m[2]);
+            if (month) return `${m[3]}-${month}-${day}`;
+        }
+        // Try Mon DD, YYYY or Month DD, YYYY
+        m = str.match(/\b([A-Za-z]{3,})\s+(0?[1-9]|[12]\d|3[01]),?\s+((?:19|20)\d{2})\b/);
+        if (m) {
+            const day = String(m[2]).padStart(2, '0');
+            const month = this.monthToNumber(m[1]);
+            if (month) return `${m[3]}-${month}-${day}`;
+        }
+        return null;
+    }
+
+    monthToNumber(name) {
+        const map = {
+            jan: '01', january: '01',
+            feb: '02', february: '02',
+            mar: '03', march: '03',
+            apr: '04', april: '04',
+            may: '05',
+            jun: '06', june: '06',
+            jul: '07', july: '07',
+            aug: '08', august: '08',
+            sep: '09', sept: '09', september: '09',
+            oct: '10', october: '10',
+            nov: '11', november: '11',
+            dec: '12', december: '12'
+        };
+        const key = String(name || '').toLowerCase().slice(0, 9);
+        return map[key] || map[key.slice(0, 3)] || null;
+    }
+
+    fillDetailsForm({ idType, firstName, lastName, birthDate, idNumber }) {
+        const idTypeEl = document.getElementById('id-type');
+        const idNumEl = document.getElementById('id-number');
+        const fnEl = document.getElementById('first-name');
+        const lnEl = document.getElementById('last-name');
+        const bdEl = document.getElementById('birth-date');
+
+        if (idTypeEl && idType) idTypeEl.value = idType;
+        if (fnEl && firstName) fnEl.value = firstName;
+        if (lnEl && lastName) lnEl.value = lastName;
+        if (idNumEl && idNumber) idNumEl.value = idNumber;
+        if (bdEl && birthDate) {
+            const iso = this.normalizeDate(birthDate) || birthDate;
+            // only set if it's valid for input[type=date]
+            if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) bdEl.value = iso;
         }
     }
 
