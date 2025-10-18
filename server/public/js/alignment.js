@@ -100,6 +100,17 @@ class AlignmentChecker {
     performAutoCapture() {
         console.log('Auto-capturing image...');
         
+        // Show capture flash
+        const guideRect = document.querySelector('.guide-rectangle');
+        if (guideRect) {
+            guideRect.style.transition = 'none';
+            guideRect.style.backgroundColor = 'rgba(255, 255, 255, 0.6)';
+            setTimeout(() => {
+                guideRect.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+                guideRect.style.backgroundColor = 'transparent';
+            }, 150);
+        }
+        
         // Trigger capture through camera manager
         if (window.cameraManager && window.cameraManager.isActive()) {
             window.cameraManager.captureImage();
@@ -110,7 +121,7 @@ class AlignmentChecker {
                 this.feedbackMessage.textContent = '✓ Image captured!';
                 
                 setTimeout(() => {
-                    this.feedbackMessage.textContent = originalMessage;
+                    this.feedbackMessage.textContent = 'Center your document';
                 }, 2000);
             }
         }

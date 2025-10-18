@@ -13,17 +13,24 @@ class CameraManager {
 
     initializeElements() {
         this.startBtn = document.getElementById('start-camera');
-        this.captureBtn = document.getElementById('capture-btn');
         this.switchBtn = document.getElementById('switch-camera');
+        this.recaptureBtn = document.getElementById('recapture-btn');
     }
 
     setupEventListeners() {
-        this.startBtn.addEventListener('click', () => this.startCamera());
-        this.captureBtn.addEventListener('click', () => {
-            this.showCaptureFlash();
-            this.captureImage();
+        this.startBtn.addEventListener('click', () => {
+            this.startCamera();
+            this.startBtn.style.display = 'none'; // Hide start button
+            this.switchBtn.style.display = 'inline-flex'; // Show switch button
         });
+        
         this.switchBtn.addEventListener('click', () => this.switchCamera());
+        
+        this.recaptureBtn.addEventListener('click', () => {
+            this.recaptureBtn.style.display = 'none'; // Hide recapture button
+            this.startBtn.style.display = 'inline-flex'; // Show start button
+            this.startBtn.click(); // Trigger start camera
+        });
         
         // Handle video metadata loaded
         this.video.addEventListener('loadedmetadata', () => {
@@ -91,11 +98,8 @@ class CameraManager {
             this.currentDeviceId = videoTrack.getSettings().deviceId;
 
             // Update UI
-            this.startBtn.textContent = 'Stop Camera';
-            this.startBtn.classList.remove('btn-primary');
-            this.startBtn.classList.add('btn-secondary');
-            this.captureBtn.disabled = false;
             this.switchBtn.disabled = this.devices.length <= 1;
+            this.switchBtn.style.display = 'inline-flex'; // Show switch button
 
             console.log('Camera started successfully');
             
@@ -122,11 +126,9 @@ class CameraManager {
             window.alignmentChecker.stopChecking();
         }
 
-        // Update UI
-        this.startBtn.textContent = 'Start Camera';
-        this.startBtn.classList.remove('btn-secondary');
-        this.startBtn.classList.add('btn-primary');
-        this.captureBtn.disabled = true;
+        // Update UI - Hide camera buttons, show recapture
+        this.startBtn.style.display = 'none';
+        this.switchBtn.style.display = 'none';
         this.switchBtn.disabled = true;
     }
 
@@ -168,6 +170,12 @@ class CameraManager {
         if (window.ocrProcessor) {
             window.ocrProcessor.processImageData(croppedImageDataUrl);
         }
+
+        // Stop camera after capture and show recapture button
+        setTimeout(() => {
+            this.stopCamera();
+            this.recaptureBtn.style.display = 'inline-flex'; // Show recapture button
+        }, 500); // Small delay to ensure capture completes
 
         return croppedImageDataUrl;
     }

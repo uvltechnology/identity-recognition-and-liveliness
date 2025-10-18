@@ -46,13 +46,7 @@ class IdentityOCRApp {
     setupGlobalEventHandlers() {
         // Handle keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            // Space bar to capture image (when camera is active)
-            if (e.code === 'Space' && window.cameraManager && window.cameraManager.isActive()) {
-                e.preventDefault();
-                window.cameraManager.captureImage();
-            }
-            
-            // Escape to stop camera
+            // Escape to stop camera (removed Space bar capture)
             if (e.code === 'Escape' && window.cameraManager && window.cameraManager.isActive()) {
                 window.cameraManager.stopCamera();
             }
@@ -356,17 +350,21 @@ window.AppUtils = AppUtils;
 // Help function for users
 window.showHelp = function() {
     const helpText = `
-Identity OCR App - Keyboard Shortcuts:
-• Space Bar: Capture image (when camera is active)
+Identity OCR App - Instructions:
+• Position your identity document within the guide rectangle
+• Hold still for 3 seconds when the rectangle turns green
+• Image will be auto-captured and camera will stop
+• Click "Recapture" to take another photo
+
+Keyboard Shortcuts:
 • Escape: Stop camera
-• Click on extracted text to copy to clipboard
 
 Features:
+• Auto-capture with 3-second countdown
 • Visual alignment guide with real-time feedback
-• Multiple OCR types: Basic Text, Document Structure, Identity Document
-• Camera switching support
-• File upload support
-• Real-time brightness, focus, and position feedback
+• Automatic rectangle cropping
+• Identity document OCR processing
+• Camera auto-stop after capture
 `;
     alert(helpText);
 };
