@@ -4,6 +4,7 @@ import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import OCRService from './services/ocrService.js';
+import { extractIdentityFromText } from './services/identityExtractor.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -91,8 +92,32 @@ app.post('/api/ocr/identity', upload.single('image'), async (req, res) => {
       });
     }
 
-    const result = await ocrService.extractIdentityText(req.file.buffer);
-    res.json(result);
+    // Extract raw text using Google Vision OCR
+    const ocrResult = await ocrService.extractIdentityText(req.file.buffer);
+    
+    if (!ocrResult.success) {
+      return res.json(ocrResult);
+    }
+
+    // Extract structured identity fields using AI (with image)
+    const useAI = String(process.env.OPENAI_USE || 'false').toLowerCase() === 'true';
+    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    
+    const rawText = ocrResult.basicText?.text || ocrResult.structuredText?.text || '';
+    const imageBase64 = req.file.buffer.toString('base64');
+    
+    const fields = await extractIdentityFromText(rawText, { 
+      useAI, 
+      model,
+      imageBase64: `data:image/jpeg;base64,${imageBase64}`
+    });
+
+    res.json({
+      success: true,
+      fields,
+      rawText,
+      ocrResult
+    });
 
   } catch (error) {
     console.error('Identity OCR endpoint error:', error);
@@ -125,7 +150,26 @@ app.post('/api/ocr/base64', async (req, res) => {
         result = await ocrService.extractStructuredText(imageBuffer);
         break;
       case 'identity':
+        // Extract raw text using Google Vision OCR
         result = await ocrService.extractIdentityText(imageBuffer);
+        
+        if (result.success) {
+          // Extract structured identity fields using AI (with image)
+          const useAI = String(process.env.OPENAI_USE || 'false').toLowerCase() === 'true';
+          const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+          
+          const rawText = result.basicText?.text || result.structuredText?.text || '';
+          
+          // Pass the base64 image to AI for visual analysis
+          const fields = await extractIdentityFromText(rawText, { 
+            useAI, 
+            model,
+            imageBase64: image // Already in base64 format with data URL
+          });
+          
+          result.fields = fields;
+          result.rawText = rawText;
+        }
         break;
       default:
         result = await ocrService.extractText(imageBuffer);

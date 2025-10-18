@@ -138,6 +138,12 @@ class OCRProcessor {
     }
 
     displayIdentityResults(container, result) {
+        // Display extracted identity fields first
+        if (result.fields) {
+            const fieldsSection = this.createFieldsSection(result.fields);
+            container.appendChild(fieldsSection);
+        }
+
         // Identity document results (combines basic and structured)
         if (result.basicText && result.basicText.text) {
             const basicSection = this.createResultSection('Basic Text Extraction', result.basicText.text);
@@ -165,6 +171,77 @@ class OCRProcessor {
             );
             container.appendChild(infoSection);
         }
+    }
+
+    createFieldsSection(fields) {
+        const section = document.createElement('div');
+        section.className = 'result-section fields-highlight';
+        section.style.cssText = 'background: #f0f9ff; border-left: 4px solid #0ea5e9; padding: 15px; border-radius: 8px; margin-bottom: 20px;';
+
+        const titleElement = document.createElement('div');
+        titleElement.className = 'result-title';
+        titleElement.style.cssText = 'color: #0369a1; font-size: 1.1rem; font-weight: bold; margin-bottom: 12px;';
+        
+        let titleText = '📋 Extracted Identity Fields';
+        if (fields.source === 'ai-vision') {
+            titleText += ' ✅ <span style="color: #16a34a; font-size: 0.85rem;">(AI Vision-Verified)</span>';
+        } else if (fields.source === 'ai-text') {
+            titleText += ' <span style="color: #2563eb; font-size: 0.85rem;">(AI-Powered)</span>';
+        }
+        
+        titleElement.innerHTML = titleText;
+
+        const fieldsGrid = document.createElement('div');
+        fieldsGrid.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;';
+
+        const fieldLabels = {
+            firstName: '👤 First Name',
+            lastName: '👤 Last Name',
+            birthDate: '📅 Birth Date',
+            idNumber: '🆔 ID Number'
+        };
+
+        for (const [key, label] of Object.entries(fieldLabels)) {
+            const value = fields[key];
+            const fieldDiv = document.createElement('div');
+            fieldDiv.style.cssText = 'background: white; padding: 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);';
+            
+            fieldDiv.innerHTML = `
+                <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 4px;">${label}</div>
+                <div style="font-size: 1rem; font-weight: 600; color: ${value ? '#0f172a' : '#94a3b8'};">
+                    ${value || 'Not found'}
+                </div>
+            `;
+            
+            fieldsGrid.appendChild(fieldDiv);
+        }
+
+        // Add confidence and verification status
+        const statusDiv = document.createElement('div');
+        statusDiv.style.cssText = 'background: white; padding: 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);';
+        
+        let statusIcon = '⚡';
+        let statusColor = '#0f172a';
+        let statusLabel = 'Confidence';
+        
+        if (fields.verified) {
+            statusIcon = '✅';
+            statusColor = '#16a34a';
+            statusLabel = 'Image Verified';
+        }
+        
+        statusDiv.innerHTML = `
+            <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 4px;">${statusIcon} ${statusLabel}</div>
+            <div style="font-size: 1rem; font-weight: 600; color: ${statusColor}; text-transform: capitalize;">
+                ${fields.confidence || 'medium'}
+            </div>
+        `;
+        fieldsGrid.appendChild(statusDiv);
+
+        section.appendChild(titleElement);
+        section.appendChild(fieldsGrid);
+
+        return section;
     }
 
     createResultSection(title, content) {
