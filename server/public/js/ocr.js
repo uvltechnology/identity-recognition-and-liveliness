@@ -11,74 +11,11 @@ class OCRProcessor {
         this.loadingElement = document.getElementById('loading');
         this.resultsContainer = document.getElementById('results-container');
         this.ocrTypeSelect = document.getElementById('ocr-type');
-        this.fileInput = document.getElementById('file-input');
-        this.fileName = document.getElementById('file-name');
-        this.processFileBtn = document.getElementById('process-file');
         this.previewImage = document.getElementById('preview-image');
     }
 
     setupEventListeners() {
-        // File input change
-        this.fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
-        
-        // Process file button
-        this.processFileBtn.addEventListener('click', () => this.processSelectedFile());
-    }
-
-    handleFileSelect(event) {
-        const file = event.target.files[0];
-        if (!file) {
-            this.fileName.textContent = '';
-            this.processFileBtn.disabled = true;
-            return;
-        }
-
-        // Validate file type
-        const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-        if (!allowedTypes.includes(file.type)) {
-            alert('Please select a valid image file (JPEG, PNG, or WebP)');
-            this.fileInput.value = '';
-            return;
-        }
-
-        // Validate file size (10MB limit)
-        if (file.size > 10 * 1024 * 1024) {
-            alert('File size must be less than 10MB');
-            this.fileInput.value = '';
-            return;
-        }
-
-        this.fileName.textContent = file.name;
-        this.processFileBtn.disabled = false;
-
-        // Show preview
-        this.displayFilePreview(file);
-    }
-
-    displayFilePreview(file) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const previewImg = document.getElementById('preview-image');
-            const noImageDiv = previewImg.parentElement.querySelector('.no-image');
-            
-            previewImg.src = e.target.result;
-            previewImg.style.display = 'block';
-            if (noImageDiv) {
-                noImageDiv.style.display = 'none';
-            }
-        };
-        reader.readAsDataURL(file);
-    }
-
-    async processSelectedFile() {
-        const file = this.fileInput.files[0];
-        if (!file) return;
-
-        const formData = new FormData();
-        formData.append('image', file);
-
-        const ocrType = this.ocrTypeSelect.value;
-        await this.processWithAPI(formData, ocrType, false);
+        // No file upload listeners needed
     }
 
     async processImageData(imageDataUrl) {
@@ -89,10 +26,10 @@ class OCRProcessor {
             type: ocrType
         };
 
-        await this.processWithAPI(requestData, ocrType, true);
+        await this.processWithAPI(requestData, ocrType);
     }
 
-    async processWithAPI(data, ocrType, isBase64 = false) {
+    async processWithAPI(data, ocrType) {
         // Cancel previous request if still pending
         if (this.currentRequest) {
             this.currentRequest.abort();
@@ -101,20 +38,15 @@ class OCRProcessor {
         this.showLoading();
 
         try {
-            const endpoint = isBase64 ? `${this.apiBaseUrl}/base64` : `${this.apiBaseUrl}/${ocrType}`;
+            const endpoint = `${this.apiBaseUrl}/base64`;
             
             const requestOptions = {
-                method: 'POST'
-            };
-
-            if (isBase64) {
-                requestOptions.headers = {
+                method: 'POST',
+                headers: {
                     'Content-Type': 'application/json'
-                };
-                requestOptions.body = JSON.stringify(data);
-            } else {
-                requestOptions.body = data;
-            }
+                },
+                body: JSON.stringify(data)
+            };
 
             // Create AbortController for request cancellation
             const controller = new AbortController();
