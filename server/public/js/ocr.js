@@ -12,18 +12,35 @@ class OCRProcessor {
         this.resultsContainer = document.getElementById('results-container');
         this.ocrTypeSelect = document.getElementById('ocr-type');
         this.previewImage = document.getElementById('preview-image');
+        this.idTypeSelect = document.getElementById('id-type');
+        this.templateOverlay = document.getElementById('template-overlay');
     }
 
     setupEventListeners() {
-        // No file upload listeners needed
+        // Toggle template overlay based on ID type
+        if (this.idTypeSelect && this.templateOverlay) {
+            const updateTemplate = () => {
+                const val = this.idTypeSelect.value;
+                if (val === 'national-id') {
+                    this.templateOverlay.style.display = 'block';
+                    this.templateOverlay.src = 'assets/national-id-template.svg';
+                } else {
+                    this.templateOverlay.style.display = 'none';
+                }
+            };
+            this.idTypeSelect.addEventListener('change', updateTemplate);
+            updateTemplate();
+        }
     }
 
     async processImageData(imageDataUrl) {
         const ocrType = this.ocrTypeSelect.value;
+        const idType = this.idTypeSelect ? this.idTypeSelect.value : 'national-id';
         
         const requestData = {
             image: imageDataUrl,
-            type: ocrType
+            type: ocrType,
+            idType
         };
 
         await this.processWithAPI(requestData, ocrType);
@@ -455,10 +472,8 @@ class OCRProcessor {
         titleElement.style.cssText = 'color: #0369a1; font-size: 1.1rem; font-weight: bold; margin-bottom: 12px;';
         
         let titleText = '📋 Extracted Identity Fields';
-        if (fields.source === 'ai-vision') {
-            titleText += ' ✅ <span style="color: #16a34a; font-size: 0.85rem;">(AI Vision-Verified)</span>';
-        } else if (fields.source === 'ai-text') {
-            titleText += ' <span style="color: #2563eb; font-size: 0.85rem;">(AI-Powered)</span>';
+        if (fields.source === 'ai-text') {
+            titleText += ' <span style="color: #2563eb; font-size: 0.85rem;">(AI • OCR Text)</span>';
         }
         
         titleElement.innerHTML = titleText;
@@ -488,19 +503,13 @@ class OCRProcessor {
             fieldsGrid.appendChild(fieldDiv);
         }
 
-        // Add confidence and verification status
+        // Add confidence status (no image verification)
         const statusDiv = document.createElement('div');
         statusDiv.style.cssText = 'background: white; padding: 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);';
         
         let statusIcon = '⚡';
         let statusColor = '#0f172a';
-        let statusLabel = 'Confidence';
-        
-        if (fields.verified) {
-            statusIcon = '✅';
-            statusColor = '#16a34a';
-            statusLabel = 'Image Verified';
-        }
+        let statusLabel = 'AI Confidence';
         
         statusDiv.innerHTML = `
             <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 4px;">${statusIcon} ${statusLabel}</div>

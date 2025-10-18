@@ -99,18 +99,14 @@ app.post('/api/ocr/identity', upload.single('image'), async (req, res) => {
       return res.json(ocrResult);
     }
 
-    // Extract structured identity fields using AI (with image)
+    // Extract structured identity fields using AI (TEXT-ONLY)
     const useAI = String(process.env.OPENAI_USE || 'false').toLowerCase() === 'true';
     const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
     
-    const rawText = ocrResult.basicText?.text || ocrResult.structuredText?.text || '';
-    const imageBase64 = req.file.buffer.toString('base64');
+  const rawText = ocrResult.basicText?.text || ocrResult.structuredText?.text || '';
+  const idType = req.body?.idType || 'national-id';
     
-    const fields = await extractIdentityFromText(rawText, { 
-      useAI, 
-      model,
-      imageBase64: `data:image/jpeg;base64,${imageBase64}`
-    });
+  const fields = await extractIdentityFromText(rawText, { useAI, model, idType });
 
     res.json({
       success: true,
@@ -131,7 +127,7 @@ app.post('/api/ocr/identity', upload.single('image'), async (req, res) => {
 // Handle base64 image uploads
 app.post('/api/ocr/base64', async (req, res) => {
   try {
-    const { image, type } = req.body;
+    const { image, type, idType } = req.body;
 
     if (!image) {
       return res.status(400).json({
@@ -154,18 +150,12 @@ app.post('/api/ocr/base64', async (req, res) => {
         result = await ocrService.extractIdentityText(imageBuffer);
         
         if (result.success) {
-          // Extract structured identity fields using AI (with image)
+          // Extract structured identity fields using AI (TEXT-ONLY)
           const useAI = String(process.env.OPENAI_USE || 'false').toLowerCase() === 'true';
           const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
           
           const rawText = result.basicText?.text || result.structuredText?.text || '';
-          
-          // Pass the base64 image to AI for visual analysis
-          const fields = await extractIdentityFromText(rawText, { 
-            useAI, 
-            model,
-            imageBase64: image // Already in base64 format with data URL
-          });
+          const fields = await extractIdentityFromText(rawText, { useAI, model, idType: idType || 'national-id' });
           
           result.fields = fields;
           result.rawText = rawText;
