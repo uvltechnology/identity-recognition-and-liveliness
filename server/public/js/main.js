@@ -76,6 +76,17 @@ class IdentityOCRApp {
         window.addEventListener('beforeunload', () => {
             this.cleanup();
         });
+
+        // React to ID Type changes (toggle passport mode)
+        const idTypeEl = document.getElementById('id-type');
+        if (idTypeEl) {
+            idTypeEl.addEventListener('change', () => {
+                const guideRect = document.querySelector('.guide-rectangle');
+                if (!guideRect) return;
+                const isPassport = String(idTypeEl.value).toLowerCase() === 'passport';
+                guideRect.classList.toggle('passport-mode', isPassport);
+            });
+        }
     }
 
     checkCameraSupport() {

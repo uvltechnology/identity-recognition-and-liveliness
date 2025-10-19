@@ -52,12 +52,6 @@
                         <button id="start-camera" class="btn btn-primary inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50">Start Camera</button>
                         <button id="switch-camera" class="btn btn-secondary inline-flex items-center justify-center rounded-md bg-gray-700 px-4 py-2 text-sm font-medium text-white shadow hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-500 disabled:cursor-not-allowed disabled:opacity-50" style="display: none;" disabled>Switch Camera</button>
                         <button id="recapture-btn" class="btn btn-primary inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500" style="display: none;">Recapture</button>
-                        
-                        <!-- ID Type Select -->
-                        <label for="id-type" class="text-sm text-gray-700">ID Type:</label>
-                        <select id="id-type" class="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30">
-                            <option value="national-id" selected>National ID</option>
-                        </select>
                         <!-- Hidden OCR Type - Always Identity Document -->
                         <select id="ocr-type" style="display: none;">
                             <option value="identity" selected>Identity Document</option>
@@ -76,6 +70,7 @@
                                 <label for="id-type" class="mb-1 block text-xs font-medium text-gray-600">ID Type</label>
                                 <select id="id-type" class="block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500">
                                     <option value="national-id" selected>National ID</option>
+                                    <option value="passport">Passport</option>
                                 </select>
                             </div>
                             <!-- ID Number -->

@@ -34,7 +34,7 @@ class AlignmentChecker {
                 optimalVariance: 300
             },
             position: {
-                centerTolerance: 0.15, // 15% tolerance from center
+                centerTolerance: 0.12, // 12% tolerance from center
                 sizeTolerance: 0.2 // 20% size tolerance
             }
         };
@@ -140,6 +140,12 @@ class AlignmentChecker {
             guideText.style.color = '#4CAF50';
             guideText.style.fontSize = '1.5rem';
             guideText.style.fontWeight = '700';
+        }
+
+        // Ensure the outline (guide rectangle) is green during countdown (capture-ready)
+        if (this.guideRectangle) {
+            this.guideRectangle.classList.remove('status-warning', 'status-error');
+            this.guideRectangle.classList.add('status-good');
         }
     }
 

@@ -27,6 +27,10 @@ class CameraManager {
         this.switchBtn.addEventListener('click', () => this.switchCamera());
         
         this.recaptureBtn.addEventListener('click', () => {
+            // Clear extracted details before new capture
+            if (window.ocrProcessor && typeof window.ocrProcessor.clearExtractedDetails === 'function') {
+                window.ocrProcessor.clearExtractedDetails();
+            }
             this.recaptureBtn.style.display = 'none'; // Hide recapture button
             this.startBtn.style.display = 'inline-flex'; // Show start button
             this.startBtn.click(); // Trigger start camera

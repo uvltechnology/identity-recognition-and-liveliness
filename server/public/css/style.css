@@ -94,16 +94,27 @@ main {
     box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4);
 }
 
+/* Passport mode: increase guide width for wider document framing */
+.guide-rectangle.passport-mode {
+    width: 95%;
+}
+
 @media (min-width: 640px) {
     .guide-rectangle {
         width: 75%;
         height: 60%;
+    }
+    .guide-rectangle.passport-mode {
+        width: 85%;
     }
 }
 
 @media (min-width: 1024px) {
     .guide-rectangle {
         width: 70%;
+    }
+    .guide-rectangle.passport-mode {
+        width: 80%;
     }
 }
 
