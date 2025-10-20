@@ -540,6 +540,107 @@ class GeminiService {
       return { error: 'Gemini parsing failed', details: msg };
     }
   }
+
+  /**
+   * Ask Gemini to extract TIN (Tax Identification) ID fields from raw OCR.
+   * Philippines TIN commonly uses 3-3-3 (9 digits) or 3-3-3-3 (with branch code) formatting.
+   * @param {string} rawText
+   */
+  async extractTINID(rawText) {
+    if (!this.enabled) {
+      return { error: 'Gemini API key not configured', disabled: true };
+    }
+    if (!rawText || !rawText.trim()) return { firstName: undefined, lastName: undefined, birthDate: undefined, idNumber: undefined, confidence: 0 };
+
+    const system = [
+      'You are an information extraction engine for Philippine Tax Identification (TIN) cards.',
+      'Given noisy OCR text, return a single JSON object with these keys:',
+      '{"firstName": string | null, "lastName": string | null, "birthDate": string | null, "idNumber": string | null, "confidence": number}',
+      'Rules:',
+      "- idNumber must be formatted as either 'XXX-XXX-XXX' (9 digits) or 'XXX-XXX-XXX-XXX' (12 digits with branch), using only digits (X=0-9).",
+      "- Accept labels like 'TIN', 'Tax Identification Number', 'Taxpayer Identification Number'.",
+      '- birthDate must be ISO date: YYYY-MM-DD if month/day are known; otherwise null.',
+      "- Extract 'Surname' and 'First/Given Name(s)' when available.",
+      '- Respond with ONLY the compact JSON object. No code blocks, no prose.'
+    ].join('\n');
+
+    const user = `OCR TEXT START\n${rawText}\nOCR TEXT END`;
+
+    try {
+      const monthToNumber = (name) => {
+        const map = { jan:'01', january:'01', feb:'02', february:'02', mar:'03', march:'03', apr:'04', april:'04', may:'05', jun:'06', june:'06', jul:'07', july:'07', aug:'08', august:'08', sep:'09', sept:'09', september:'09', oct:'10', october:'10', nov:'11', november:'11', dec:'12', december:'12' };
+        const key = String(name || '').toLowerCase().slice(0, 9);
+        return map[key] || map[key.slice(0, 3)] || null;
+      };
+      const normalizeDate = (s) => {
+        if (!s) return undefined;
+        const str = String(s).trim();
+        let m = str.match(/\b(20\d{2}|19\d{2})[-\/.](0[1-9]|1[0-2])[-\/.](0[1-9]|[12]\d|3[01])\b/);
+        if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+        m = str.match(/\b(0[1-9]|[12]\d|3[01])[\/\-](0[1-9]|1[0-2])[\/\-]((?:19|20)\d{2})\b/);
+        if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+        m = str.match(/\b(0[1-9]|1[0-2])[\/\-](0[1-9]|[12]\d|3[01])[\/\-]((?:19|20)\d{2})\b/);
+        if (m) return `${m[3]}-${m[1]}-${m[2]}`;
+        m = str.match(/\b(0[1-9]|[12]\d|3[01])\s+([A-Za-z]{3,})\s+((?:19|20)\d{2})\b/);
+        if (m) {
+          const day = m[1].padStart(2, '0');
+          const month = monthToNumber(m[2]);
+          if (month) return `${m[3]}-${month}-${day}`;
+        }
+        m = str.match(/\b([A-Za-z]{3,})\s+(0?[1-9]|[12]\d|3[01]),?\s+((?:19|20)\d{2})\b/);
+        if (m) {
+          const day = String(m[2]).padStart(2, '0');
+          const month = monthToNumber(m[1]);
+          if (month) return `${m[3]}-${month}-${day}`;
+        }
+        return undefined;
+      };
+      const normalizeTIN = (s) => {
+        if (!s) return undefined;
+        const digits = String(s).replace(/[^0-9]/g, '');
+        if (digits.length >= 12) {
+          const d = digits.slice(0, 12);
+          return `${d.slice(0,3)}-${d.slice(3,6)}-${d.slice(6,9)}-${d.slice(9,12)}`;
+        }
+        if (digits.length >= 9) {
+          const d = digits.slice(0, 9);
+          return `${d.slice(0,3)}-${d.slice(3,6)}-${d.slice(6,9)}`;
+        }
+        const m = String(s).match(/^(\d{3})-(\d{3})-(\d{3})(?:-(\d{3}))?$/);
+        if (m) return m[4] ? `${m[1]}-${m[2]}-${m[3]}-${m[4]}` : `${m[1]}-${m[2]}-${m[3]}`;
+        return undefined;
+      };
+
+      const model = this.client.getGenerativeModel({
+        model: this.modelId,
+        systemInstruction: system
+      });
+      const result = await model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: user }]}],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.2 }
+      });
+      const text = result?.response?.text?.() || '';
+      const trimmed = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/,'').trim();
+      let parsed;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (e) {
+        const match = trimmed.match(/\{[\s\S]*\}/);
+        if (match) parsed = JSON.parse(match[0]); else throw e;
+      }
+
+      const firstName = typeof parsed.firstName === 'string' ? parsed.firstName.trim() || undefined : undefined;
+      const lastName = typeof parsed.lastName === 'string' ? parsed.lastName.trim() || undefined : undefined;
+      const birthDate = typeof parsed.birthDate === 'string' ? (normalizeDate(parsed.birthDate) || undefined) : undefined;
+      const idNumber = typeof parsed.idNumber === 'string' ? (normalizeTIN(parsed.idNumber) || undefined) : undefined;
+      const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : undefined;
+      return { firstName, lastName, birthDate, idNumber, confidence, rawText: text };
+    } catch (err) {
+      const msg = err?.message || String(err);
+      console.error('[GeminiService] extractTINID error:', msg);
+      return { error: 'Gemini parsing failed', details: msg };
+    }
+  }
 }
 
 export default GeminiService;

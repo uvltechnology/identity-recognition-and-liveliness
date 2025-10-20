@@ -201,7 +201,8 @@ class OCRProcessor {
     const applyPhilHealthRules = this.isPhilHealthSelected ? this.isPhilHealthSelected() : (document.getElementById('id-type') && String(document.getElementById('id-type').value).toLowerCase() === 'philhealth');
         // UMID condition: flips true only when the "ID Type" dropdown (#id-type) value is 'umid'
         // This toggles all UMID-specific extraction in fillUmidFromWords()
-        const applyUmidRules = this.isUmidSelected();
+    const applyUmidRules = this.isUmidSelected();
+    const applyTinRules = this.isTinIdSelected();
         // Display extracted identity fields first
         if (result.fields) {
             // Also try to populate the details form from server-side extracted fields
@@ -224,6 +225,10 @@ class OCRProcessor {
             // National ID parsing delegated to separate module
             if (applyNationalIdRules && window.NationalID && typeof window.NationalID.fillFromText === 'function') {
                 window.NationalID.fillFromText(result.basicText.text);
+            }
+            // TIN parsing
+            if (applyTinRules && window.TINID && typeof window.TINID.fillFromText === 'function') {
+                window.TINID.fillFromText(result.basicText.text);
             }
             // Passport parsing
             if (applyPassportRules && window.Passport && typeof window.Passport.fillFromText === 'function') {
@@ -250,6 +255,9 @@ class OCRProcessor {
             // Attempt parsing from structured text as well (fallback/merge)
             if (applyNationalIdRules && window.NationalID && typeof window.NationalID.fillFromText === 'function') {
                 window.NationalID.fillFromText(result.structuredText.text);
+            }
+            if (applyTinRules && window.TINID && typeof window.TINID.fillFromText === 'function') {
+                window.TINID.fillFromText(result.structuredText.text);
             }
             if (applyPassportRules && window.Passport && typeof window.Passport.fillFromText === 'function') {
                 window.Passport.fillFromText(result.structuredText.text);
@@ -290,6 +298,10 @@ class OCRProcessor {
             // UMID-specific extraction handled by separate module (window.UMID)
             if (applyUmidRules && window.UMID && typeof window.UMID.fillFromWords === 'function') {
                 window.UMID.fillFromWords(result.basicText.words);
+            }
+            // TIN-specific extraction handled by separate module (window.TINID)
+            if (applyTinRules && window.TINID && typeof window.TINID.fillFromWords === 'function') {
+                window.TINID.fillFromWords(result.basicText.words);
             }
         }
 
@@ -428,6 +440,13 @@ class OCRProcessor {
         return String(sel.value).toLowerCase() === 'philhealth';
     }
 
+    // Helper: Only apply TIN rules when selected
+    isTinIdSelected() {
+        const sel = document.getElementById('id-type');
+        if (!sel) return false;
+        return String(sel.value).toLowerCase() === 'tin-id';
+    }
+
     // UMID extraction moved to js/scanning-algorithm/umid.js
 
     // extractUmidLastName moved to js/scanning-algorithm/umid.js
@@ -561,7 +580,9 @@ class OCRProcessor {
                             ? 'Passport'
                             : this.isNationalIdSelected()
                                 ? 'National ID'
-                                : 'Identity Document';
+                                : this.isTinIdSelected()
+                                    ? 'TIN'
+                                    : 'Identity Document';
             titleEl.textContent = `🤖 AI extraction (${typeLabel})`;
             aiSection.appendChild(titleEl);
 

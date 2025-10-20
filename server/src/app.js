@@ -174,6 +174,32 @@ app.post('/api/ai/passport/parse', async (req, res) => {
   }
 });
 
+// AI extraction endpoint for TIN ID (Gemini first)
+app.post('/api/ai/tin-id/parse', async (req, res) => {
+  try {
+    const { rawText } = req.body || {};
+    if (!rawText || !rawText.trim()) {
+      return res.status(400).json({ success: false, error: 'rawText is required' });
+    }
+    if (!geminiService.enabled) {
+      return res.status(501).json({ success: false, error: 'Gemini not configured', disabled: true });
+    }
+    const result = await geminiService.extractTINID(rawText);
+    if (result.error && !result.disabled) {
+      return res.status(502).json({ success: false, error: result.error, details: result.details });
+    }
+    return res.json({ success: true, fields: {
+      firstName: result.firstName,
+      lastName: result.lastName,
+      birthDate: result.birthDate,
+      idNumber: result.idNumber,
+    }, confidence: result.confidence, raw: result.rawText });
+  } catch (err) {
+    console.error('AI TIN ID parse endpoint error:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error in AI parse' });
+  }
+});
+
 // OCR endpoints
 app.post('/api/ocr/text', upload.single('image'), async (req, res) => {
   try {
