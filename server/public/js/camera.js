@@ -45,6 +45,10 @@ class CameraManager {
         // Handle video metadata loaded
         this.video.addEventListener('loadedmetadata', () => {
             this.setupCanvas();
+            // Size guide rectangle after video metadata is available
+            if (window.identityOCRApp && typeof window.identityOCRApp.sizeGuideRectangle === 'function') {
+                window.identityOCRApp.sizeGuideRectangle();
+            }
         });
     }
     

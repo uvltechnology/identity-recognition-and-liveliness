@@ -55,6 +55,7 @@ class IdentityOCRApp {
         // Handle window resize
         window.addEventListener('resize', this.debounce(() => {
             this.handleResize();
+            this.sizeGuideRectangle();
         }, 250));
 
         // Handle page visibility changes (pause/resume alignment checking)
@@ -85,7 +86,10 @@ class IdentityOCRApp {
                 if (!guideRect) return;
                 const isPassport = String(idTypeEl.value).toLowerCase() === 'passport';
                 guideRect.classList.toggle('passport-mode', isPassport);
+                this.sizeGuideRectangle();
             });
+            // Initial sizing based on default selection
+            this.sizeGuideRectangle();
         }
     }
 
@@ -201,6 +205,30 @@ class IdentityOCRApp {
     handleResize() {
         // Handle responsive adjustments if needed
         console.log('Window resized');
+    }
+
+    // Dynamically size the guide rectangle based on camera container width
+    sizeGuideRectangle() {
+        const container = document.querySelector('.camera-container');
+        const guide = document.querySelector('.guide-rectangle');
+        const idTypeEl = document.getElementById('id-type');
+        if (!container || !guide) return;
+
+        const containerWidth = container.clientWidth;
+        // Choose aspect ratio per ID type (width:height)
+        const idType = (idTypeEl?.value || 'national-id').toLowerCase();
+        let aspect = 1.586; // default ~ID card (85.6x54mm)
+        if (idType === 'passport') aspect = 1.414; // approx A-series ratio
+        if (idType === 'umid') aspect = 1.586; // same as ID card
+
+        // Guide width as a fraction of container width
+        const widthFrac = idType === 'passport' ? 0.9 : 0.8; // wider for passport
+        const guideWidthPx = Math.round(containerWidth * widthFrac);
+        const guideHeightPx = Math.round(guideWidthPx / aspect);
+
+        // Apply size via inline style to avoid becoming square
+        guide.style.width = `${guideWidthPx}px`;
+        guide.style.height = `${guideHeightPx}px`;
     }
 
     cleanup() {
