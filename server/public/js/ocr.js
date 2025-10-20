@@ -14,6 +14,8 @@ class OCRProcessor {
         this.loadNameVariants();
         // Lazy-load middle variants
         this.loadMiddleVariants();
+        // Debug mode: when enabled, show raw OCR blocks and preview image for troubleshooting
+        this.debugMode = this.detectDebugMode();
     }
 
     initializeElements() {
@@ -21,6 +23,8 @@ class OCRProcessor {
         this.resultsContainer = document.getElementById('results-container');
         this.ocrTypeSelect = document.getElementById('ocr-type');
         this.previewImage = document.getElementById('preview-image');
+        // Hide preview image by default in embed unless debugMode is enabled
+        try { if (this.previewImage && typeof this.debugMode !== 'undefined' && !this.debugMode) this.previewImage.style.display = 'none'; } catch (e) {}
     }
 
     setupEventListeners() {
@@ -75,6 +79,17 @@ class OCRProcessor {
         }
     }
 
+    detectDebugMode() {
+        try {
+            const params = new URLSearchParams(window.location.search || '');
+            if (params.get('debug') === 'true') return true;
+            if (typeof window.__IDENTITY_DEBUG__ !== 'undefined') return !!window.__IDENTITY_DEBUG__;
+        } catch (e) {
+            // ignore
+        }
+        return false;
+    }
+
     async processImageData(imageDataUrl) {
         const ocrType = this.ocrTypeSelect.value;
         
@@ -97,6 +112,8 @@ class OCRProcessor {
         try {
             const endpoint = `${this.apiBaseUrl}/base64`;
             
+            // Include session id if present so server can associate/store the image and OCR
+            try { if (window.__IDENTITY_SESSION__) data.sessionId = window.__IDENTITY_SESSION__; } catch (e) {}
             const requestOptions = {
                 method: 'POST',
                 headers: {
@@ -223,6 +240,11 @@ class OCRProcessor {
                     // All required fields present — show final details-only view
                     this.showFinalDetailsOnly(result.fields);
 
+                    // Also show a modal with the results inside the iframe for immediate feedback
+                    try {
+                        this.showResultModal(result.fields || {});
+                    } catch (e) { console.warn('showResultModal failed', e); }
+
                     // If success webhook configured, POST the result
                     try {
                         const successUrl = window.__IDENTITY_SUCCESS_URL__ || null;
@@ -262,27 +284,30 @@ class OCRProcessor {
         }
 
         // Identity document results (combines basic and structured)
-        if (result.basicText && result.basicText.text) {
-            const basicSection = this.createResultSection('Basic Text Extraction', result.basicText.text);
-            container.appendChild(basicSection);
+        // Only render raw OCR/structured text sections when debugMode is enabled
+        if (this.debugMode) {
+            if (result.basicText && result.basicText.text) {
+                const basicSection = this.createResultSection('Basic Text Extraction', result.basicText.text);
+                container.appendChild(basicSection);
 
-            // National ID parsing delegated to separate module
-            if (applyNationalIdRules && window.NationalID && typeof window.NationalID.fillFromText === 'function') {
-                window.NationalID.fillFromText(result.basicText.text);
+                // National ID parsing delegated to separate module
+                if (applyNationalIdRules && window.NationalID && typeof window.NationalID.fillFromText === 'function') {
+                    window.NationalID.fillFromText(result.basicText.text);
+                }
+            }
+
+            if (result.structuredText && result.structuredText.text) {
+                const structuredSection = this.createResultSection('Structured Text', result.structuredText.text);
+                container.appendChild(structuredSection);
+
+                // Attempt parsing from structured text as well (fallback/merge)
+                if (applyNationalIdRules && window.NationalID && typeof window.NationalID.fillFromText === 'function') {
+                    window.NationalID.fillFromText(result.structuredText.text);
+                }
             }
         }
 
-        if (result.structuredText && result.structuredText.text) {
-            const structuredSection = this.createResultSection('Structured Text', result.structuredText.text);
-            container.appendChild(structuredSection);
-
-            // Attempt parsing from structured text as well (fallback/merge)
-            if (applyNationalIdRules && window.NationalID && typeof window.NationalID.fillFromText === 'function') {
-                window.NationalID.fillFromText(result.structuredText.text);
-            }
-        }
-
-        if (result.basicText && result.basicText.words && result.basicText.words.length > 0) {
+        if (this.debugMode && result.basicText && result.basicText.words && result.basicText.words.length > 0) {
             const wordsSection = this.createResultSection(
                 `Detected Words (${result.basicText.words.length} total)`,
                 this.formatWordsList(result.basicText.words)
@@ -680,7 +705,8 @@ class OCRProcessor {
         // Hide raw OCR sections and captured image; show only the details form values
         try {
             const preview = document.getElementById('preview-image');
-            if (preview) preview.style.display = 'none';
+            // Only hide preview if debug is not enabled
+            if (preview && !this.debugMode) preview.style.display = 'none';
 
             const resultsSection = document.querySelector('.results-section');
             if (resultsSection) resultsSection.style.display = 'none';
@@ -691,6 +717,65 @@ class OCRProcessor {
 
             // Optionally autofocus Save on parent admin page when embedded (postMessage handled elsewhere)
         } catch (e) { console.warn('showFinalDetailsOnly failed', e); }
+    }
+
+    // Show modal with extracted results inside the embed iframe
+    showResultModal(fields) {
+        try {
+            // Remove existing modal if present
+            const existing = document.getElementById('identity-result-modal');
+            if (existing) existing.remove();
+
+            const modal = document.createElement('div');
+            modal.id = 'identity-result-modal';
+            modal.style.cssText = `position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:100000;`;
+
+            const backdrop = document.createElement('div');
+            backdrop.style.cssText = 'position:absolute; inset:0; background:rgba(2,6,23,0.6);';
+
+            const box = document.createElement('div');
+            box.style.cssText = 'position:relative; z-index:100001; width:min(720px,94%); background:white; border-radius:10px; padding:18px; box-shadow:0 10px 40px rgba(2,6,23,0.6);';
+
+            const title = document.createElement('div');
+            title.style.cssText = 'font-size:1.1rem; font-weight:700; margin-bottom:8px;';
+            title.textContent = 'Results:';
+
+            const list = document.createElement('div');
+            list.style.cssText = 'display:grid; gap:8px; margin-top:6px;';
+
+            const entries = [
+                ['First Name', fields.firstName || fields.givenName || ''],
+                ['Last Name', fields.lastName || fields.familyName || ''],
+                ['Birth Date', fields.birthDate || ''],
+                ['ID Number', fields.idNumber || fields.id || '']
+            ];
+
+            entries.forEach(([label, val]) => {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex; justify-content:space-between; gap:12px;';
+                const l = document.createElement('div'); l.style.cssText = 'color:#374151; font-weight:600;'; l.textContent = label;
+                const v = document.createElement('div'); v.style.cssText = 'color:#111827;'; v.textContent = val || 'Not found';
+                row.appendChild(l); row.appendChild(v);
+                list.appendChild(row);
+            });
+
+            const closeRow = document.createElement('div');
+            closeRow.style.cssText = 'display:flex; justify-content:flex-end; margin-top:12px;';
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = 'Close';
+            closeBtn.style.cssText = 'padding:8px 12px; border-radius:6px; background:#0ea5e9; color:white; border:0; cursor:pointer;';
+            closeBtn.addEventListener('click', () => modal.remove());
+            closeRow.appendChild(closeBtn);
+
+            box.appendChild(title);
+            box.appendChild(list);
+            box.appendChild(closeRow);
+
+            modal.appendChild(backdrop);
+            modal.appendChild(box);
+
+            document.body.appendChild(modal);
+        } catch (e) { console.warn('showResultModal error', e); }
     }
 }
 

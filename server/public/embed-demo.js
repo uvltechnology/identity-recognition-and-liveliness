@@ -10,6 +10,7 @@
   const messages = document.getElementById('messages');
   let currentSession = null;
   let currentIframe = null;
+  let lastIdType = 'national-id';
 
   function logMessage(m){
     const node = document.createElement('div');
@@ -29,9 +30,11 @@
     const successWebhook = document.getElementById('successWebhook').value || undefined;
     const cancelWebhook = document.getElementById('cancelWebhook').value || undefined;
 
-    const payload = { frontendBase, idType };
+  const payload = { frontendBase, idType };
     if (successWebhook) payload.successWebhook = successWebhook;
     if (cancelWebhook) payload.cancelWebhook = cancelWebhook;
+  // remember last selected id type so we can inform the iframe on load
+  lastIdType = idType;
 
     try{
       createBtn.disabled = true;
@@ -45,8 +48,8 @@
       showSession(json);
       // Build iframe src (prefer server-provided iframeUrl)
       const src = json.iframeUrl || json.wrapperUrl || json.directAdminUrl || '';
-      // Open modal with iframe
-      openModalWithSrc(src + (src.includes('?') ? '&' : '?') + `expectedOrigin=${encodeURIComponent(window.location.origin)}`);
+  // Open modal with iframe. Append expectedOrigin param to help embed verify parent origin.
+  openModalWithSrc(src + (src.includes('?') ? '&' : '?') + `expectedOrigin=${encodeURIComponent(window.location.origin)}`);
     }catch(e){
       console.warn('create session failed', e);
       alert('Failed to create session');
@@ -84,6 +87,25 @@
     ifr.setAttribute('allow','camera; microphone; fullscreen');
     modalFrameArea.appendChild(ifr);
     currentIframe = ifr;
+    // When the iframe loads, send a configure message with the chosen idType so the embed can select scanning algorithm
+    try {
+      ifr.addEventListener('load', () => {
+        try {
+          const payload = { action: 'configure', idType: lastIdType };
+          // Compute the iframe origin and post the message to that origin for correctness
+          let targetOrigin = '*';
+          try { targetOrigin = new URL(ifr.src, window.location.href).origin; } catch (e) { /* fallback to wildcard */ }
+          if (ifr.contentWindow && typeof ifr.contentWindow.postMessage === 'function') {
+            console.log('[embed-demo] posting configure message', payload, 'to', targetOrigin);
+            ifr.contentWindow.postMessage({ identityOCR: payload }, targetOrigin);
+            // retry after a short delay in case the iframe listener wasn't ready yet
+            setTimeout(() => {
+              try { ifr.contentWindow.postMessage({ identityOCR: payload }, targetOrigin); console.log('[embed-demo] retry configure message'); } catch (e) { /* ignore */ }
+            }, 250);
+          }
+        } catch (e) { console.warn('Failed to post configure message to iframe', e); }
+      });
+    } catch (e) { /* ignore */ }
   }
 
   modalClose.addEventListener('click', ()=>{ modal.style.display = 'none'; modalFrameArea.innerHTML = ''; currentIframe = null; });

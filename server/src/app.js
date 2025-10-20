@@ -3,8 +3,10 @@ import cors from 'cors';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs/promises';
 import OCRService from './services/ocrService.js';
 import { extractIdentityFromText } from './services/identityExtractor.js';
+import { extractFieldsUsingOpenAI } from './services/openaiExtractor.js';
 
 // Optional Redis client (used if REDIS_URL or IDENTITY_REDIS_URL env var is set)
 let redisClient = null;
@@ -53,6 +55,66 @@ async function safePostWebhook(url, body) {
   } catch (e) {
     console.warn('[identity] webhook POST failed', url, e && e.message ? e.message : e);
   }
+}
+
+// Storage helpers: upload image buffer to S3 (if configured) or local public folder
+let s3Client = null;
+let s3Bucket = process.env.AWS_S3_BUCKET || process.env.IDENTITY_S3_BUCKET || '';
+async function uploadImageToStorage(base64Data, sid) {
+  const buffer = Buffer.from(base64Data, 'base64');
+  const filename = `identity_${sid}_${Date.now()}.jpg`;
+  // Prefer S3 if bucket configured
+  if (s3Bucket) {
+    try {
+      // dynamic import so package is optional
+      const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
+      if (!s3Client) {
+        s3Client = new S3Client({ region: process.env.AWS_REGION || process.env.IDENTITY_S3_REGION || 'us-east-1' });
+      }
+      const key = `temp/${sid}/${filename}`;
+      const cmd = new PutObjectCommand({ Bucket: s3Bucket, Key: key, Body: buffer, ContentType: 'image/jpeg' });
+      await s3Client.send(cmd);
+      // store reference as { type: 's3', key }
+      return { type: 's3', key };
+    } catch (e) {
+      console.warn('[identity] S3 upload failed, falling back to local storage', e && e.message ? e.message : e);
+    }
+  }
+
+  // Fallback: write into public/temp_uploads so it's served by this server's static middleware
+  try {
+    const publicDir = path.join(__dirname, '../public');
+    const uploadsDir = path.join(publicDir, 'temp_uploads');
+    await fs.mkdir(uploadsDir, { recursive: true });
+    const outPath = path.join(uploadsDir, filename);
+    await fs.writeFile(outPath, buffer);
+    const url = `/temp_uploads/${filename}`; // relative URL served by express.static
+    return { type: 'local', url };
+  } catch (e) {
+    console.warn('[identity] local image write failed', e && e.message ? e.message : e);
+    return null;
+  }
+}
+
+async function deleteImageFromStorage(ref) {
+  if (!ref) return;
+  try {
+    if (ref.type === 's3' && ref.key && s3Bucket) {
+      try {
+        const { S3Client, DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+        if (!s3Client) s3Client = new S3Client({ region: process.env.AWS_REGION || process.env.IDENTITY_S3_REGION || 'us-east-1' });
+        const cmd = new DeleteObjectCommand({ Bucket: s3Bucket, Key: ref.key });
+        await s3Client.send(cmd);
+      } catch (e) { console.warn('[identity] S3 delete failed', e && e.message ? e.message : e); }
+    }
+    if (ref.type === 'local' && ref.url) {
+      try {
+        const publicDir = path.join(__dirname, '../public');
+        const filePath = path.join(publicDir, ref.url.replace(/^\//, ''));
+        await fs.unlink(filePath).catch(()=>{});
+      } catch (e) { /* ignore */ }
+    }
+  } catch (e) { /* ignore */ }
 }
 
 // In-memory verification sessions store (simple; for production use persistent store)
@@ -327,9 +389,9 @@ app.get('/verify/session/:id', async (req, res) => {
       <meta name="viewport" content="width=device-width,initial-scale=1" />
       <title>Identity Verification</title>
       <style>
-        html,body{height:100%;margin:0}
+        html,body{height:100%;margin:0;padding:0;overflow:hidden}
         .frame-wrap{height:100vh;display:flex;align-items:stretch}
-        iframe{flex:1;border:0;width:100%;height:100%;}
+        iframe{flex:1;border:0;width:100%;height:100%;display:block;}
       </style>
     </head>
     <body>
@@ -378,6 +440,23 @@ app.get('/embed/session/:id', async (req, res) => {
         <!-- Tailwind for matching styles like index.html -->
         <script src="https://cdn.tailwindcss.com"></script>
         <script>tailwind.config = { darkMode: 'class', theme: { extend: {} } }</script>
+        <style>
+          /* Embed-specific overrides: make camera fill iframe and prevent scrolling */
+          *, *::before, *::after { box-sizing: border-box; }
+          html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+          .app-container, main { height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden; }
+          main { display: flex; flex-direction: column; height: 100%; }
+          .grid { gap: 0; height: 100%; grid-template-columns: 1fr; }
+          .camera-section { flex: 1 1 auto; width: 100%; height: 100%; padding: 0; margin: 0; display:flex; align-items:stretch; }
+          .camera-container { position: relative; width: 100%; height: 100%; border-radius: 0; border: 0; overflow: hidden; }
+          .camera-container video { width: 100% !important; height: 100% !important; object-fit: cover !important; display:block; }
+          .overlay-container { position: absolute; inset: 0; display:flex; align-items:center; justify-content:center; pointer-events: none; }
+          .guide-rectangle { width: 80%; height: 60%; max-width: 100%; max-height: 100%; }
+          /* Hide right column if present */
+          .results-section { display: none !important; }
+          /* Camera controls float over the video */
+          .camera-controls { position: absolute; bottom: 12px; left: 12px; z-index: 2000; pointer-events: auto; }
+        </style>
           <script>
           // Do NOT mark embed true until user gives consent. main.js will auto-start camera when embed=true.
           window.__IDENTITY_EMBED__ = false;
@@ -497,6 +576,8 @@ app.get('/embed/session/:id', async (req, res) => {
                 <div class="camera-container relative overflow-hidden rounded-xl border border-gray-200 bg-black shadow-sm">
                   <video id="video" autoplay muted playsinline class="h-64 w-full object-cover sm:h-72 md:h-80 lg:h-[26rem]"></video>
                   <canvas id="canvas" style="display: none;"></canvas>
+                  <!-- Hidden preview image for embed mode (off-screen) to keep capture flow robust when UI elements are removed -->
+                  <img id="preview-image" alt="preview" style="display:none; width:1px; height:1px; position:absolute; left:-9999px; top:-9999px;" />
 
                   <!-- Rectangle guide overlay -->
                   <div class="overlay-container pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -535,69 +616,60 @@ app.get('/embed/session/:id', async (req, res) => {
                           }
                         }
                       } catch (e) { /* ignore */ }
+                      // Listen for configuration messages (e.g., from demo harness) to set id type dynamically
+                      try {
+                        window.addEventListener('message', (evt) => {
+                          try {
+                            const expected = window.__IDENTITY_EXPECTED_ORIGIN__ || '*';
+                            if (expected !== '*' && evt.origin !== expected) return; // enforce expected origin when provided
+                            console.log('[embed] received postMessage', evt.origin, evt.data);
+                            const msg = evt.data;
+                            if (!msg || !msg.identityOCR) return;
+                            const payload = msg.identityOCR;
+                            if (payload.action === 'configure' && payload.idType) {
+                              const el = document.getElementById('id-type');
+                              if (el) el.value = payload.idType;
+                              // let the main app react if present (resize guides / adjust ROI)
+                              try { if (window.identityOCRApp && typeof window.identityOCRApp.sizeGuideRectangle === 'function') window.identityOCRApp.sizeGuideRectangle(); } catch(e){}
+                            }
+                          } catch (e) { /* ignore message handler errors */ }
+                        });
+                      } catch (e) { /* ignore */ }
                     });
                   </script>
                 </div>
 
                 <div class="camera-controls flex flex-wrap items-center gap-3">
-                  <button id="start-camera" class="btn btn-primary inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700">Start Camera</button>
-                  <button id="switch-camera" class="btn btn-secondary inline-flex items-center justify-center rounded-md bg-gray-700 px-4 py-2 text-sm font-medium text-white shadow" style="display:none;" disabled>Switch Camera</button>
+                  <!-- Start and Switch camera buttons removed for embed; camera will auto-start (back-facing) after consent -->
                   <button id="recapture-btn" class="btn btn-primary inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow" style="display:none;">Recapture</button>
                   <select id="ocr-type" style="display:none;"><option value="identity" selected>Identity Document</option></select>
                 </div>
-              </div>
 
-              <!-- Right: Preview + Results (matching index.html) -->
-              <div class="results-section space-y-4">
-                <div class="details-section rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-                  <h3 class="text-base font-medium">Extracted Details</h3>
-                  <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div>
-                      <label for="id-type" class="mb-1 block text-xs font-medium text-gray-600">ID Type</label>
-                      <select id="id-type" class="block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <option value="national-id" selected>National ID</option>
-                        <option value="passport">Passport</option>
-                        <option value="umid">Unified Multi-Purpose Identification (UMID) Card</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label for="id-number" class="mb-1 block text-xs font-medium text-gray-600">ID Number</label>
-                      <input id="id-number" type="text" placeholder="Auto-filled from OCR" class="block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-                    </div>
-                    <div>
-                      <label for="last-name" class="mb-1 block text-xs font-medium text-gray-600">Last Name</label>
-                      <input id="last-name" type="text" placeholder="Apelyido / Last Name" class="block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-                    </div>
-                    <div>
-                      <label for="first-name" class="mb-1 block text-xs font-medium text-gray-600">First Name</label>
-                      <input id="first-name" type="text" placeholder="Mga Pangalan / Given Names" class="block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-                    </div>
-                    <div>
-                      <label for="birth-date" class="mb-1 block text-xs font-medium text-gray-600">Birth Date</label>
-                      <input id="birth-date" type="date" class="block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500" />
-                    </div>
-                  </div>
-                </div>
-
-                <div class="preview-section rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-                  <h3 class="text-base font-medium">Captured Image</h3>
-                  <div class="image-preview mt-3 flex min-h-[160px] items-center justify-center overflow-hidden rounded-lg bg-gray-50">
-                    <img id="preview-image" class="max-h-80 w-auto max-w-full object-contain" alt="Captured image will appear here" />
-                    <div class="no-image text-sm text-gray-500">No image captured yet</div>
-                  </div>
-                </div>
-
-                <div class="ocr-results rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-                  <h3 class="text-base font-medium">OCR Results</h3>
-                  <div class="loading mt-3 hidden items-center gap-2 text-sm text-gray-700" id="loading">
-                    <div class="spinner h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div>
-                    <span>Processing image...</span>
-                  </div>
-                  <div class="results-container mt-3 max-h-[22rem] overflow-auto rounded-md bg-gray-50 p-3 text-sm text-gray-800" id="results-container">
-                    <div class="no-results text-gray-500">Process an image to see OCR results</div>
-                  </div>
+                <!-- Hidden debug/data area: kept in DOM so client code can update preview/results/loading without showing UI -->
+                <div id="hidden-data" aria-hidden="true" style="display:none; position:absolute; left:-9999px; top:-9999px; width:1px; height:1px; overflow:hidden;">
+                  <!-- off-screen preview image (also used by displayPreview) -->
+                  <img id="preview-image" alt="preview" style="display:none; width:1px; height:1px;" />
+                  <!-- Hidden ID type selector so scanning logic can read the chosen id type -->
+                  <select id="id-type" style="display:none;">
+                    <option value="national-id" selected>National ID</option>
+                    <option value="passport">Passport</option>
+                    <option value="umid">UMID</option>
+                  </select>
+                  <!-- captured image holder (unused visually but available for debug or server fetch) -->
+                  <img id="captured-image" alt="captured" style="display:none; width:1px; height:1px;" />
+                  <!-- results container expected by ocr.js -->
+                  <div id="results-container" style="display:none;"></div>
+                  <!-- loading indicator element (ocr.js will toggle) -->
+                  <div id="loading" style="display:none;">Loading...</div>
+                  <!-- container to hold parsed OCR JSON or raw text if client writes it -->
+                  <pre id="ocr-result" style="display:none; white-space:pre-wrap;">{
+                  }</pre>
+                  <!-- details section placeholder referenced by showFinalDetailsOnly -->
+                  <div class="details-section" style="display:none;"></div>
                 </div>
               </div>
+
+              <!-- Right column (results/preview) removed for embed: extracted details, captured image and OCR results are now hidden by default -->
             </div>
           </main>
         </div>
@@ -654,6 +726,10 @@ async function postSessionResultHandler(req, res) {
       if (['cancelled', 'canceled', 'failed'].includes(status) && p.cancelWebhook) {
         safePostWebhook(p.cancelWebhook, { sessionId: id, status: s.status, result });
       }
+      // If terminal, cleanup temporary storage (best-effort)
+      if (['done', 'completed', 'success', 'cancelled', 'canceled', 'failed'].includes(status)) {
+        try { await cleanupTempForSession(id); } catch (e) { /* ignore */ }
+      }
     } catch (e) {
       console.warn('[identity] webhook dispatch error', e && e.message ? e.message : e);
     }
@@ -667,6 +743,88 @@ async function postSessionResultHandler(req, res) {
 
 app.post('/api/verify/session/:id/result', postSessionResultHandler);
 app.post('/verify/session/:id/result', postSessionResultHandler);
+
+// Retrieve temporary image and OCR stored for a session (if any)
+app.get('/api/verify/session/:id/temp', async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!id) return res.status(400).json({ success: false, error: 'Missing session id' });
+    let imageRef = null;
+    let ocr = null;
+    if (useRedis && redisClient) {
+      try {
+        const rawRef = await redisClient.get(`verify:image_ref:${id}`);
+        imageRef = rawRef ? JSON.parse(rawRef) : null;
+        const raw = await redisClient.get(`verify:ocr:${id}`);
+        ocr = raw ? JSON.parse(raw) : null;
+      } catch (e) { console.warn('[identity] redis read temp failed', e); }
+    }
+    if (!imageRef) {
+      const sess = await getSession(id);
+      if (sess && sess.payload) {
+        imageRef = sess.payload.tempImageRef || null;
+        ocr = sess.payload.tempOcr || null;
+      }
+    }
+
+    // If imageRef is S3, generate presigned URL if possible
+    let imageUrl = null;
+    try {
+      if (imageRef && imageRef.type === 's3' && imageRef.key && s3Bucket) {
+        try {
+          const { GetObjectCommand } = await import('@aws-sdk/client-s3');
+          const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
+          if (!s3Client) {
+            const { S3Client } = await import('@aws-sdk/client-s3');
+            s3Client = new S3Client({ region: process.env.AWS_REGION || process.env.IDENTITY_S3_REGION || 'us-east-1' });
+          }
+          const cmd = new GetObjectCommand({ Bucket: s3Bucket, Key: imageRef.key });
+          imageUrl = await getSignedUrl(s3Client, cmd, { expiresIn: 3600 });
+        } catch (e) { console.warn('[identity] presign failed', e); }
+      }
+      if (!imageUrl && imageRef && imageRef.type === 'local' && imageRef.url) {
+        imageUrl = imageRef.url; // relative URL served by express.static
+      }
+    } catch (e) { /* ignore */ }
+
+    return res.json({ success: true, imageRef, imageUrl, ocr });
+  } catch (e) {
+    console.error('get temp session data error', e);
+    return res.status(500).json({ success: false, error: 'Failed to read temp session data' });
+  }
+});
+
+// Helper to remove temp keys after finalization
+async function cleanupTempForSession(id) {
+  if (!id) return;
+  try {
+    // If we have an image reference in redis, remove stored image
+    let imageRef = null;
+    if (useRedis && redisClient) {
+      try {
+        const raw = await redisClient.get(`verify:image_ref:${id}`);
+        imageRef = raw ? JSON.parse(raw) : null;
+        await redisClient.del(`verify:image_ref:${id}`);
+        await redisClient.del(`verify:ocr:${id}`);
+      } catch (e) { /* ignore */ }
+    }
+    // If no redis ref, check session payload
+    const sess = await getSession(id);
+    if (sess && sess.payload) {
+      try {
+        imageRef = imageRef || sess.payload.tempImageRef || null;
+        delete sess.payload.tempImageRef;
+        delete sess.payload.tempOcr;
+        await setSession(id, sess);
+      } catch (e) { /* ignore */ }
+    }
+
+    // Delete the actual stored image (S3 or local) if we have a reference
+    try {
+      if (imageRef) await deleteImageFromStorage(imageRef);
+    } catch (e) { /* ignore */ }
+  } catch (e) { /* ignore */ }
+}
 
 // Handle base64 image uploads
 app.post('/api/ocr/base64', async (req, res) => {
@@ -690,16 +848,119 @@ app.post('/api/ocr/base64', async (req, res) => {
         result = await ocrService.extractStructuredText(imageBuffer);
         break;
       case 'identity':
-        // Extract raw text using Google Vision OCR
+        // Extract raw text using Google Vision OCR on the server
         result = await ocrService.extractIdentityText(imageBuffer);
-        
+
         if (result.success) {
           const rawText = result.basicText?.text || result.structuredText?.text || '';
           const fields = await extractIdentityFromText(rawText, { idType: idType || 'national-id' });
-          
+
           result.fields = fields;
           result.rawText = rawText;
+          // If OpenAI configured, attempt to improve or supplement extracted fields using model
+          try {
+            const openaiKey = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY || null;
+            if (openaiKey) {
+              const imageUrl = null; // we could provide a presigned URL if desired
+              const oa = await extractFieldsUsingOpenAI({ rawText: rawText || '', imageUrl, idType: idType || 'national-id' });
+              if (oa) {
+                // Log the entire OpenAI full response for auditing (redact keys in prod if needed)
+                try { console.info('[identity] openai full response for session', sid, oa.fullResponse ? oa.fullResponse : oa); } catch (e) { /* ignore logging errors */ }
+                if (oa.success && oa.parsed) {
+                  // Merge in parsed fields but do not overwrite existing non-null values
+                  const merged = { ...(result.fields || {}) };
+                  for (const k of ['firstName','lastName','idNumber','birthDate','confidence']) {
+                    const v = oa.parsed[k];
+                    if (v !== undefined && v !== null && (merged[k] === undefined || merged[k] === null || merged[k] === '')) {
+                      merged[k] = v;
+                    }
+                  }
+                  result.fields = merged;
+                  result.openai = { raw: oa.rawAssistant || null, parsed: oa.parsed };
+                } else if (!oa.success) {
+                  result.openai = { error: oa.error || 'openai failed' };
+                }
+              }
+            }
+          } catch (e) { console.warn('[identity] openai field extraction failed', e); }
         }
+        // If the request included a sessionId, store the captured image and OCR result in Redis (temporary)
+        try {
+          const sid = String(req.body.sessionId || req.query.sessionId || '');
+          if (sid) {
+            const ttlSeconds = Number(process.env.VERIFY_SESSION_TTL_SECONDS || 60 * 60);
+            // Store base64 image and OCR JSON in Redis if available, otherwise attach to in-memory session payload
+            // Upload image to storage (S3 or local) and store reference in Redis/session
+            let imageRef = null;
+            try {
+              imageRef = await uploadImageToStorage(base64Data, sid);
+            } catch (e) { console.warn('[identity] uploadImageToStorage failed', e); }
+
+            // Log the OCR result server-side for debugging/audit
+            try {
+              console.info('[identity] OCR result for session', sid, {
+                fields: result.fields || null,
+                rawText: (result.rawText || result.basicText?.text || result.structuredText?.text) || null
+              });
+            } catch (e) { /* ignore logging errors */ }
+
+            if (useRedis && redisClient) {
+              try {
+                if (imageRef) await redisClient.set(`verify:image_ref:${sid}`, JSON.stringify(imageRef), { EX: ttlSeconds });
+                await redisClient.set(`verify:ocr:${sid}`, JSON.stringify(result || {}), { EX: ttlSeconds });
+                console.info('[identity] stored imageRef+ocr for session in redis', sid);
+              } catch (e) {
+                console.warn('[identity] redis store failed, falling back to session payload', e && e.message ? e.message : e);
+                const existing = await getSession(sid);
+                if (existing) {
+                  const upd = { ...(existing.payload || {}), tempImageRef: imageRef, tempOcr: result };
+                  existing.payload = upd;
+                  await setSession(sid, existing, ttlSeconds);
+                }
+              }
+            } else {
+              const existing = await getSession(sid);
+              if (existing) {
+                const upd = { ...(existing.payload || {}), tempImageRef: imageRef, tempOcr: result };
+                existing.payload = upd;
+                await setSession(sid, existing, ttlSeconds);
+              }
+            }
+            
+
+            // Update session status/result and notify webhooks if terminal
+            try {
+              const existing = await getSession(sid);
+              if (existing) {
+                // merge result into session.result
+                const updated = { ...existing };
+                updated.result = { ...(updated.result || {}), fields: result.fields, rawText: result.rawText };
+                // If required fields present, mark done
+                const required = ['firstName', 'lastName', 'idNumber'];
+                const missing = required.filter(k => !result.fields || !result.fields[k]);
+                if (missing.length === 0) {
+                  updated.status = 'done';
+                  updated.finishedAt = new Date().toISOString();
+                } else {
+                  updated.status = 'processing';
+                }
+                const ttl2 = Number(process.env.VERIFY_SESSION_TTL_SECONDS || 60 * 60);
+                await setSession(sid, updated, ttl2);
+
+                // Dispatch webhooks for terminal state (best-effort)
+                try {
+                  const p = updated.payload || {};
+                  if (['done', 'completed', 'success'].includes(String(updated.status).toLowerCase()) && p.successWebhook) {
+                    safePostWebhook(p.successWebhook, { sessionId: sid, status: updated.status, result: updated.result });
+                  }
+                  if (['cancelled', 'canceled', 'failed'].includes(String(updated.status).toLowerCase()) && p.cancelWebhook) {
+                    safePostWebhook(p.cancelWebhook, { sessionId: sid, status: updated.status, result: updated.result });
+                  }
+                } catch (e) { console.warn('[identity] webhook dispatch after ocr failed', e); }
+              }
+            } catch (e) { console.warn('[identity] session update after ocr failed', e); }
+          }
+        } catch (e) { console.warn('[identity] failed to store temp image/ocr', e); }
         break;
       default:
         result = await ocrService.extractText(imageBuffer);

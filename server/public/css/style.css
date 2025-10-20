@@ -16,7 +16,7 @@ body {
 .app-container {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 20px;
+    padding: 0px !important;
 }
 
 header {
@@ -41,8 +41,8 @@ main {
     grid-template-columns: 1fr 1fr;
     gap: 30px;
     background: white;
-    border-radius: 15px;
-    padding: 30px;
+    /* border-radius: 15px; */
+    padding: 2px;
     box-shadow: 0 20px 40px rgba(0,0,0,0.1);
 }
 

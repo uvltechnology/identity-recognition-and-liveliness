@@ -24,23 +24,28 @@ class CameraManager {
     }
 
     setupEventListeners() {
-        this.startBtn.addEventListener('click', () => {
-            this.startCamera();
-            this.startBtn.style.display = 'none'; // Hide start button
-            this.switchBtn.style.display = 'inline-flex'; // Show switch button
-        });
-        
-        this.switchBtn.addEventListener('click', () => this.switchCamera());
-        
-        this.recaptureBtn.addEventListener('click', () => {
+        if (this.startBtn) {
+            this.startBtn.addEventListener('click', () => {
+                this.startCamera();
+                try { this.startBtn.style.display = 'none'; } catch (e) {}
+                try { if (this.switchBtn) this.switchBtn.style.display = 'inline-flex'; } catch (e) {}
+            });
+        }
+
+        if (this.switchBtn) {
+            this.switchBtn.addEventListener('click', () => this.switchCamera());
+        }
+
+        if (this.recaptureBtn) {
+            this.recaptureBtn.addEventListener('click', () => {
             // Clear extracted details before new capture
             if (window.ocrProcessor && typeof window.ocrProcessor.clearExtractedDetails === 'function') {
                 window.ocrProcessor.clearExtractedDetails();
             }
-            this.recaptureBtn.style.display = 'none'; // Hide recapture button
-            this.startBtn.style.display = 'inline-flex'; // Show start button
-            this.startBtn.click(); // Trigger start camera
+            try { this.recaptureBtn.style.display = 'none'; } catch (e) {}
+            try { if (this.startBtn) { this.startBtn.style.display = 'inline-flex'; this.startBtn.click(); } else { this.startCamera(); } } catch (e) { try { this.startCamera(); } catch (e2) {} }
         });
+        }
         
         // Handle video metadata loaded
         this.video.addEventListener('loadedmetadata', () => {
@@ -112,8 +117,8 @@ class CameraManager {
             this.currentDeviceId = videoTrack.getSettings().deviceId;
 
             // Update UI
-            this.switchBtn.disabled = this.devices.length <= 1;
-            this.switchBtn.style.display = 'inline-flex'; // Show switch button
+            try { if (this.switchBtn) this.switchBtn.disabled = this.devices.length <= 1; } catch (e) {}
+            try { if (this.switchBtn) this.switchBtn.style.display = 'inline-flex'; } catch (e) {}
 
             console.log('Camera started successfully');
             
@@ -141,9 +146,9 @@ class CameraManager {
         }
 
         // Update UI - Hide camera buttons, show recapture
-        this.startBtn.style.display = 'none';
-        this.switchBtn.style.display = 'none';
-        this.switchBtn.disabled = true;
+    try { if (this.startBtn) this.startBtn.style.display = 'none'; } catch (e) {}
+    try { if (this.switchBtn) this.switchBtn.style.display = 'none'; } catch (e) {}
+    try { if (this.switchBtn) this.switchBtn.disabled = true; } catch (e) {}
     }
 
     async switchCamera() {
@@ -168,6 +173,8 @@ class CameraManager {
             return null;
         }
 
+        console.log('[camera] captureImage invoked');
+
         // Ensure canvas is properly sized
         this.setupCanvas();
 
@@ -177,18 +184,26 @@ class CameraManager {
         // Get the cropped rectangle area
         const croppedImageDataUrl = this.getCroppedRectangleArea();
         
-        // Display preview
-        this.displayPreview(croppedImageDataUrl);
+        // Display preview (non-fatal). The embed removes preview element; protect against errors.
+        try {
+            this.displayPreview(croppedImageDataUrl);
+        } catch (e) {
+            console.warn('displayPreview skipped or failed:', e);
+        }
 
-        // Trigger OCR processing
-        if (window.ocrProcessor) {
-            window.ocrProcessor.processImageData(croppedImageDataUrl);
+        // Trigger OCR processing (must run regardless of preview availability)
+        try {
+            if (window.ocrProcessor && typeof window.ocrProcessor.processImageData === 'function') {
+                window.ocrProcessor.processImageData(croppedImageDataUrl);
+            }
+        } catch (e) {
+            console.error('Failed to invoke OCR processor:', e);
         }
 
         // Stop camera after capture and show recapture button
         setTimeout(() => {
             this.stopCamera();
-            this.recaptureBtn.style.display = 'inline-flex'; // Show recapture button
+            try { if (this.recaptureBtn) this.recaptureBtn.style.display = 'inline-flex'; } catch (e) {}
         }, 500); // Small delay to ensure capture completes
 
         return croppedImageDataUrl;
@@ -421,13 +436,17 @@ class CameraManager {
     }
 
     displayPreview(imageDataUrl) {
-        const previewImg = document.getElementById('preview-image');
-        const noImageDiv = previewImg.parentElement.querySelector('.no-image');
-        
-        previewImg.src = imageDataUrl;
-        previewImg.style.display = 'block';
-        if (noImageDiv) {
-            noImageDiv.style.display = 'none';
+        try {
+            const previewImg = document.getElementById('preview-image');
+            if (!previewImg) return; // preview intentionally removed in embed; nothing to do
+            const noImageDiv = previewImg.parentElement ? previewImg.parentElement.querySelector('.no-image') : null;
+            previewImg.src = imageDataUrl;
+            previewImg.style.display = 'block';
+            if (noImageDiv) {
+                noImageDiv.style.display = 'none';
+            }
+        } catch (e) {
+            console.warn('displayPreview skipped due to error or missing DOM:', e);
         }
     }
 
