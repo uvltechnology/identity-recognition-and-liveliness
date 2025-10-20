@@ -202,7 +202,7 @@ class OCRProcessor {
         const applyUmidRules = this.isUmidSelected();
         // Display extracted identity fields first
         if (result.fields) {
-            // Also try to populate the details form from server-side extracted fields
+            // Populate the details form from server-side extracted fields
             if (applyNationalIdRules) {
                 this.fillDetailsForm({
                     idType: 'national-id',
@@ -211,6 +211,40 @@ class OCRProcessor {
                     birthDate: result?.fields?.birthDate,
                     idNumber: result?.fields?.idNumber,
                 });
+
+                // Evaluate whether required fields exist; if missing, prompt recapture
+                const required = ['firstName', 'lastName', 'idNumber'];
+                const missing = required.filter(k => !result.fields || !result.fields[k]);
+
+                if (missing.length > 0) {
+                    // Show recapture flow: prompt user to try again
+                    this.showRecapturePrompt(missing);
+                } else {
+                    // All required fields present — show final details-only view
+                    this.showFinalDetailsOnly(result.fields);
+
+                    // If success webhook configured, POST the result
+                    try {
+                        const successUrl = window.__IDENTITY_SUCCESS_URL__ || null;
+                        if (successUrl) {
+                            fetch(successUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ session: window.__IDENTITY_SESSION__ || null, fields: result.fields })
+                            }).catch(err => console.warn('Failed to POST success webhook', err));
+                        }
+                    } catch (e) { console.warn('webhook post failed', e); }
+
+                    // Notify parent window (if embed) with a close action
+                    try {
+                        if (window.parent && window.parent !== window) {
+                            const payload = { success: true, type: 'identity', session: window.__IDENTITY_SESSION__ || null, fields: result.fields, action: 'close' };
+                            const target = (typeof window.__IDENTITY_EXPECTED_ORIGIN__ === 'string' && window.__IDENTITY_EXPECTED_ORIGIN__) ? window.__IDENTITY_EXPECTED_ORIGIN__ : '*';
+                            try { window.parent.postMessage({ identityOCR: payload }, target); }
+                            catch (e) { try { window.parent.postMessage({ identityOCR: payload }, '*'); } catch (e2) { console.warn('postMessage failed', e2); } }
+                        }
+                    } catch (e) { console.warn('postMessage failed', e); }
+                }
             }
         }
 
@@ -601,6 +635,49 @@ class OCRProcessor {
         if (fnEl) fnEl.value = '';
         if (lnEl) lnEl.value = '';
         if (bdEl) bdEl.value = '';
+    }
+
+    showRecapturePrompt(missingFields = []) {
+        // Inform user which fields were missing and enable recapture
+        const message = missingFields.length > 0 ? `Missing fields: ${missingFields.join(', ')}. Please try again.` : 'Some required details are missing. Please recapture.';
+        AppUtils.showNotification(message, 'warning');
+
+        // Show recapture button and enable it
+        const recaptureBtn = document.getElementById('recapture-btn');
+        if (recaptureBtn) {
+            recaptureBtn.style.display = 'inline-flex';
+            recaptureBtn.disabled = false;
+            recaptureBtn.addEventListener('click', () => {
+                // Clear existing details and restart camera for another capture
+                this.clearExtractedDetails();
+                try {
+                    if (window.cameraManager) {
+                        recaptureBtn.style.display = 'none';
+                        window.cameraManager.startCamera();
+                        // Hide results container until new capture
+                        const results = document.getElementById('results-container');
+                        if (results) results.innerHTML = '<div class="no-results">Waiting for new capture...</div>';
+                    }
+                } catch (e) { console.warn('recapture click failed', e); }
+            }, { once: true });
+        }
+    }
+
+    showFinalDetailsOnly(fields) {
+        // Hide raw OCR sections and captured image; show only the details form values
+        try {
+            const preview = document.getElementById('preview-image');
+            if (preview) preview.style.display = 'none';
+
+            const resultsSection = document.querySelector('.results-section');
+            if (resultsSection) resultsSection.style.display = 'none';
+
+            // Ensure details section is visible (it lives in .details-section)
+            const details = document.querySelector('.details-section');
+            if (details) details.style.display = 'block';
+
+            // Optionally autofocus Save on parent admin page when embedded (postMessage handled elsewhere)
+        } catch (e) { console.warn('showFinalDetailsOnly failed', e); }
     }
 }
 

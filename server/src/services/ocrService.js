@@ -5,7 +5,17 @@ class OCRService {
     // Initialize the Google Vision client
     // The client will automatically use the GOOGLE_APPLICATION_CREDENTIALS env var
     // or default to Application Default Credentials
-    this.client = new vision.ImageAnnotatorClient();
+    try {
+      this.client = new vision.ImageAnnotatorClient();
+      this._googleClientInitError = null;
+    } catch (e) {
+      // In some environments client construction may throw synchronously
+      // (though most auth errors surface later during calls). Capture it
+      // and keep the service running in a degraded mode.
+      console.warn('[OCRService] Failed to initialize Google Vision client:', e && e.message ? e.message : e);
+      this.client = null;
+      this._googleClientInitError = e && e.message ? e.message : String(e);
+    }
   }
 
   /**
@@ -15,9 +25,13 @@ class OCRService {
    */
   async extractText(imageBuffer) {
     try {
-      const [result] = await this.client.textDetection({
-        image: { content: imageBuffer }
-      });
+      if (!this.client) {
+        const msg = this._googleClientInitError || 'Google Vision client not initialized';
+        console.error('[OCRService] extractText: no Google client:', msg);
+        return { success: false, error: `Google Vision not available: ${msg}` };
+      }
+
+      const [result] = await this.client.textDetection({ image: { content: imageBuffer } });
 
       const detections = result.textAnnotations;
       
@@ -52,13 +66,14 @@ class OCRService {
       };
 
     } catch (error) {
-      console.error('OCR Error:', error);
-      return {
-        success: false,
-        error: error.message,
-        text: '',
-        words: []
-      };
+      // Detect common Google auth/config errors and return a friendly message
+      console.error('OCR Error:', error && error.message ? error.message : error);
+      if (this._isGoogleAuthError(error)) {
+        const guidance = 'Google Cloud credentials not found. Set GOOGLE_APPLICATION_CREDENTIALS or configure Application Default Credentials. See https://cloud.google.com/docs/authentication/getting-started';
+        return { success: false, error: guidance, text: '', words: [] };
+      }
+
+      return { success: false, error: (error && error.message) ? error.message : String(error), text: '', words: [] };
     }
   }
 
@@ -69,9 +84,13 @@ class OCRService {
    */
   async extractStructuredText(imageBuffer) {
     try {
-      const [result] = await this.client.documentTextDetection({
-        image: { content: imageBuffer }
-      });
+      if (!this.client) {
+        const msg = this._googleClientInitError || 'Google Vision client not initialized';
+        console.error('[OCRService] extractStructuredText: no Google client:', msg);
+        return { success: false, error: `Google Vision not available: ${msg}`, text: '', pages: [] };
+      }
+
+      const [result] = await this.client.documentTextDetection({ image: { content: imageBuffer } });
 
       const fullTextAnnotation = result.fullTextAnnotation;
       
@@ -108,13 +127,13 @@ class OCRService {
       };
 
     } catch (error) {
-      console.error('Structured OCR Error:', error);
-      return {
-        success: false,
-        error: error.message,
-        text: '',
-        pages: []
-      };
+      console.error('Structured OCR Error:', error && error.message ? error.message : error);
+      if (this._isGoogleAuthError(error)) {
+        const guidance = 'Google Cloud credentials not found. Set GOOGLE_APPLICATION_CREDENTIALS or configure Application Default Credentials. See https://cloud.google.com/docs/authentication/getting-started';
+        return { success: false, error: guidance, text: '', pages: [] };
+      }
+
+      return { success: false, error: (error && error.message) ? error.message : String(error), text: '', pages: [] };
     }
   }
 
@@ -140,14 +159,24 @@ class OCRService {
       };
 
     } catch (error) {
-      console.error('Identity OCR Error:', error);
-      return {
-        success: false,
-        error: error.message,
-        basicText: { text: '', words: [] },
-        structuredText: { text: '', pages: [] }
-      };
+      console.error('Identity OCR Error:', error && error.message ? error.message : error);
+      if (this._isGoogleAuthError(error)) {
+        const guidance = 'Google Cloud credentials not found. Set GOOGLE_APPLICATION_CREDENTIALS or configure Application Default Credentials. See https://cloud.google.com/docs/authentication/getting-started';
+        return { success: false, error: guidance, basicText: { text: '', words: [] }, structuredText: { text: '', pages: [] } };
+      }
+
+      return { success: false, error: (error && error.message) ? error.message : String(error), basicText: { text: '', words: [] }, structuredText: { text: '', pages: [] } };
     }
+  }
+
+  // Helper to identify common Google auth-related errors
+  _isGoogleAuthError(err) {
+    if (!err) return false;
+    const msg = (err.message || '').toString().toLowerCase();
+    if (msg.includes('could not load the default credentials') || msg.includes('default credentials') || msg.includes('unauthenticated')) return true;
+    // google-auth-library wraps errors - inspect nested properties
+    if (err.code === 16 || err.code === 'UNAUTHENTICATED') return true;
+    return false;
   }
 }
 

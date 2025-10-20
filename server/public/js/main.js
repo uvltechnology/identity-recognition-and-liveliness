@@ -20,25 +20,82 @@ class IdentityOCRApp {
         this.checkCameraSupport();
         this.initialized = true;
 
+        // If running in embed mode, auto-start the camera and reduce chrome
+        try {
+            const isEmbed = Boolean(window.__IDENTITY_EMBED__ || (window.location.search || '').includes('embed=1'));
+            if (isEmbed) {
+                // Hide header and results area to only expose camera
+                const header = document.querySelector('header');
+                if (header) header.style.display = 'none';
+                const results = document.querySelector('.results-section');
+                if (results) results.style.display = 'none';
+                // Auto-start camera if available
+                setTimeout(() => {
+                    try { this.startCamera(); } catch (e) { console.warn('auto-start camera failed', e); }
+                }, 300);
+            }
+        } catch (e) { console.warn('embed auto-start check failed', e); }
         console.log('Identity OCR App initialized successfully');
     }
 
     async waitForModules() {
         // Wait for all required modules to be available
-        const maxWaitTime = 5000; // 5 seconds
-        const checkInterval = 100; // 100ms
+        const maxWaitTime = 10000; // 10 seconds (give more time in slower environments)
+        const checkInterval = 150; // 150ms
         let elapsed = 0;
 
+        const missing = () => {
+            const list = [];
+            if (!window.cameraManager) list.push('cameraManager');
+            if (!window.alignmentChecker) list.push('alignmentChecker');
+            if (!window.ocrProcessor) list.push('ocrProcessor');
+            return list;
+        };
+
         while (elapsed < maxWaitTime) {
-            if (window.cameraManager && window.alignmentChecker && window.ocrProcessor) {
-                break;
-            }
+            const m = missing();
+            if (m.length === 0) break;
+            // Log once per second to avoid spamming
+            if (elapsed % 1000 === 0) console.debug('[IdentityOCR] waiting for modules:', m.join(', '));
             await new Promise(resolve => setTimeout(resolve, checkInterval));
             elapsed += checkInterval;
         }
 
+        // If still missing, attempt to dynamically load the missing scripts (recover from a failed or out-of-order load)
+        const stillMissing = missing();
+        if (stillMissing.length > 0) {
+            console.warn('[IdentityOCR] modules still missing after initial wait:', stillMissing.join(', '));
+            try {
+                // Map module name to script path
+                const map = {
+                    cameraManager: '/js/camera.js',
+                    alignmentChecker: '/js/alignment.js',
+                    ocrProcessor: '/js/ocr.js'
+                };
+
+                const loadPromises = stillMissing.map(name => new Promise((resolve) => {
+                    const src = map[name];
+                    if (!src) return resolve();
+                    // If script already present, skip
+                    if (document.querySelector(`script[src="${src}"]`)) return resolve();
+                    const s = document.createElement('script');
+                    s.src = src;
+                    s.onload = () => { console.debug('[IdentityOCR] dynamically loaded', src); resolve(); };
+                    s.onerror = () => { console.error('[IdentityOCR] failed to dynamically load', src); resolve(); };
+                    document.head.appendChild(s);
+                }));
+
+                await Promise.all(loadPromises);
+                // Wait a bit for modules to initialize
+                const extraWait = 2000;
+                await new Promise(resolve => setTimeout(resolve, extraWait));
+            } catch (e) {
+                console.warn('[IdentityOCR] dynamic loader failed', e);
+            }
+        }
+
         if (!window.cameraManager || !window.alignmentChecker || !window.ocrProcessor) {
-            console.error('Failed to initialize all required modules');
+            console.error('Failed to initialize all required modules; missing:', missing().join(', '));
             this.showInitializationError();
         }
     }
