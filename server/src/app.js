@@ -34,6 +34,27 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const ocrService = new OCRService();
 
+// Helper to POST JSON to a webhook URL (best-effort, non-blocking)
+async function safePostWebhook(url, body) {
+  if (!url) return;
+  try {
+    // Fire-and-forget but attempt the request and log failures
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const signal = controller ? controller.signal : undefined;
+    // timeout after 6s to avoid hanging
+    if (controller) setTimeout(() => controller.abort(), 6000);
+    await fetch(String(url), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+      signal
+    });
+    console.info('[identity] webhook POST succeeded', url);
+  } catch (e) {
+    console.warn('[identity] webhook POST failed', url, e && e.message ? e.message : e);
+  }
+}
+
 // In-memory verification sessions store (simple; for production use persistent store)
 const verifySessions = new Map();
 
@@ -229,11 +250,14 @@ async function createVerifySessionHandler(req, res) {
     const sessionId = makeSessionId();
     const now = Date.now();
     // store minimal payload: who requested and optional customer id / returnTo
-  // Normalize/store requested fields: origin, idType, successUrl
+  // Normalize/store requested fields: origin, idType, successUrl, webhooks
   const storedPayload = { ...(payload || {}) };
   if (payload.origin) storedPayload.origin = payload.origin;
   if (payload.idType) storedPayload.idType = payload.idType;
   if (payload.successUrl) storedPayload.successUrl = payload.successUrl;
+  // Optional webhook URLs that caller can provide to be notified on success or cancellation
+  if (payload.successWebhook) storedPayload.successWebhook = payload.successWebhook;
+  if (payload.cancelWebhook) storedPayload.cancelWebhook = payload.cancelWebhook;
 
   const sessionObj = { id: sessionId, createdAt: now, payload: storedPayload, status: 'pending' };
     const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 60 * 60);
@@ -444,22 +468,14 @@ app.get('/embed/session/:id', async (req, res) => {
 
             // If embedded, notify parent to close the iframe/modal (retry a few times)
             try {
-              if (window.parent && window.parent !== window) {
-                const payload = { success: false, action: 'close', reason: 'consent_declined', session: window.__IDENTITY_SESSION__ || null };
-                const target = (typeof window.__IDENTITY_EXPECTED_ORIGIN__ === 'string' && window.__IDENTITY_EXPECTED_ORIGIN__) ? window.__IDENTITY_EXPECTED_ORIGIN__ : '*';
-                console.log('[identity] consent declined - notifying parent', { payload, target });
-                // Try multiple times to increase reliability across timing/race conditions
-                const attempts = 3;
-                for (let i = 0; i < attempts; i++) {
-                  try {
-                    window.parent.postMessage({ identityOCR: payload }, target);
-                  } catch (e) {
-                    try { window.parent.postMessage({ identityOCR: payload }, '*'); } catch (e2) { /* ignore */ }
+                if (window.parent && window.parent !== window) {
+                  const payload = { identityOCR: { action: 'close', reason: 'consent_declined', session: sid } };
+                  const targetOrigin = window.__IDENTITY_EXPECTED_ORIGIN__ || '*';
+                  for(let i=0;i<3;i++){
+                    try{ window.parent.postMessage(payload, targetOrigin); }catch(e){ /* ignore */ }
+                    await new Promise(r=>setTimeout(r,200));
                   }
-                  // small delay between attempts
-                  await new Promise(r => setTimeout(r, 200));
                 }
-              }
             } catch (e) { console.warn('[identity] consent decline notify failed', e); }
             // Also attempt to update session status on the server (best-effort)
             try {
@@ -624,6 +640,23 @@ async function postSessionResultHandler(req, res) {
     // If caller provided ttlSeconds, refresh TTL
     const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 60 * 60);
     await setSession(id, updated, ttl);
+
+    // Fire webhooks for terminal states (best-effort)
+    try {
+      const s = updated || {};
+      const p = s.payload || {};
+      const status = (s.status || '').toLowerCase();
+      const result = s.result || null;
+      if (['done', 'completed', 'success'].includes(status) && p.successWebhook) {
+        // send minimal payload
+        safePostWebhook(p.successWebhook, { sessionId: id, status: s.status, result });
+      }
+      if (['cancelled', 'canceled', 'failed'].includes(status) && p.cancelWebhook) {
+        safePostWebhook(p.cancelWebhook, { sessionId: id, status: s.status, result });
+      }
+    } catch (e) {
+      console.warn('[identity] webhook dispatch error', e && e.message ? e.message : e);
+    }
 
     return res.json({ success: true, session: updated });
   } catch (e) {

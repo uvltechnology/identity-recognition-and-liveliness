@@ -235,6 +235,19 @@ class OCRProcessor {
                         }
                     } catch (e) { console.warn('webhook post failed', e); }
 
+                    // Also notify the identity server about the completed session so it can persist and dispatch any configured webhooks
+                    try {
+                        const sid = window.__IDENTITY_SESSION__ || null;
+                        if (sid) {
+                            const url = `/api/verify/session/${encodeURIComponent(sid)}/result`;
+                            fetch(url, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ status: 'done', result: { fields: result.fields }, finishedAt: new Date().toISOString() })
+                            }).catch(err => console.warn('Failed to notify server of session completion', err));
+                        }
+                    } catch (e) { console.warn('session completion notify failed', e); }
+
                     // Notify parent window (if embed) with a close action
                     try {
                         if (window.parent && window.parent !== window) {
