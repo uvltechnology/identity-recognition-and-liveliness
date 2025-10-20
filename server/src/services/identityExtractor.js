@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+// OpenAI usage removed per requirement; heuristic and MRZ parsing only
 
 function parseMrz(text) {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -126,7 +126,7 @@ function pickNames(text) {
   return { firstName, lastName };
 }
 
-export async function extractIdentityFromText(text, { useAI = false, model = 'gpt-4o-mini', idType = 'national-id' } = {}) {
+export async function extractIdentityFromText(text, { idType = 'national-id' } = {}) {
   text = (text || '').replace(/\u0000/g, ' ').trim();
 
   // MRZ first
@@ -142,74 +142,6 @@ export async function extractIdentityFromText(text, { useAI = false, model = 'gp
   birthDate = birthDate || pickBirthDate(text);
   const idNumber = pickIdNumber(text, idType);
 
-  let result = { firstName, lastName, birthDate, idNumber, source: 'heuristic' };
-
-  // Optional AI refinement with OpenAI (TEXT-ONLY; image is NOT used)
-  if (useAI && process.env.OPENAI_API_KEY) {
-    try {
-      const openai = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
-      });
-
-      const messages = [
-        {
-          role: 'system',
-          content: `You are an expert at extracting information from Philippine identity documents (National ID, Driver's License, Passport, etc.).
-
-IMPORTANT: You will only be given OCR TEXT. Do not assume anything not present in the OCR text. Do not analyze or refer to any image.
-
-Extract these fields with high accuracy:
-- firstName: Given name(s) only
-- lastName: Family name/Surname only
-- birthDate: Convert to YYYY-MM-DD format (e.g., "APRIL 05, 1989" → "1989-04-05")
-- idNumber: The document's ID number. For National ID, prioritize PCN (Personal Common Reference Number); if missing, use CRN.
-
-Rules:
-1. Use only the OCR text; do not infer from missing context
-2. Handle OCR errors (O→0, I→1, S→5, etc.) when it clearly improves validity
-3. Ignore middle names unless combined with first name in a labeled field
-4. Dates: handle formats like "05 APR 1989", "APRIL 05, 1989", "04/05/1989"; output YYYY-MM-DD when possible
-5. ID numbers: normalize by removing spaces and hyphens; prefer lines labeled like PCN, CRN (for National ID), License No, ID No, Passport No
-6. Return null for any field you cannot find with reasonable confidence
-7. Provide a confidence level: high, medium, or low
-8. Return only JSON, no explanations`
-        },
-        {
-          role: 'user',
-          content: `ID Type: ${idType}\n\nOCR Text from identity document:\n\n${text}\n\nExtract: firstName, lastName, birthDate (YYYY-MM-DD), idNumber`
-        }
-      ];
-
-      console.log('[AI extraction] Using text-only mode');
-
-      const completion = await openai.chat.completions.create({
-        model: model,
-        messages: messages,
-        response_format: { type: 'json_object' },
-        temperature: 0,
-        max_tokens: 500,
-      });
-
-      const content = completion.choices[0]?.message?.content || '{}';
-      const json = JSON.parse(content);
-      
-      console.log('[AI extraction] Result:', json);
-      
-      // Prefer AI values if present; text-only source, no image verification
-      result = {
-        firstName: json.firstName || result.firstName || null,
-        lastName: json.lastName || result.lastName || null,
-        birthDate: json.birthDate || result.birthDate || null,
-        idNumber: json.idNumber || result.idNumber || null,
-        source: 'ai-text',
-        confidence: json.confidence || 'medium',
-        verified: false
-      };
-    } catch (err) {
-      console.error('[identityExtractor] OpenAI extraction failed:', err.message);
-      // keep heuristic result
-    }
-  }
-
+  const result = { firstName, lastName, birthDate, idNumber, source: 'heuristic' };
   return result;
 }

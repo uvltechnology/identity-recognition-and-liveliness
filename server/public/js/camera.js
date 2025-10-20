@@ -8,6 +8,12 @@ class CameraManager {
         this.devices = [];
         
         this.initializeElements();
+        // Per-ID Region of Interest to avoid scanning noisy areas (e.g., UMID signature strip)
+        this.ROI_CONFIG = {
+            'umid': { enabled: true, rect: { x: 0, y: 0, w: 1, h: 0.80 } },
+            'passport': { enabled: false },
+            'national-id': { enabled: false }
+        };
         this.setupEventListeners();
     }
 
@@ -268,12 +274,109 @@ class CameraManager {
         
         // Put the cropped image data onto the new canvas
         croppedCtx.putImageData(croppedImageData, 0, 0);
+
+        // Apply optional Region of Interest (ROI) based on selected ID type
+        const idTypeEl = document.getElementById('id-type');
+        const idType = idTypeEl?.value || 'national-id';
+        const roiCfg = this.ROI_CONFIG[idType];
+        let workCanvas = croppedCanvas;
+        if (roiCfg?.enabled && roiCfg.rect) {
+            workCanvas = this.cropToROI(croppedCanvas, roiCfg.rect);
+        }
+
+        // Prepare context and dimensions after ROI
+        const wctx = workCanvas.getContext('2d', { alpha: false, desynchronized: true });
+        const w = workCanvas.width;
+        const h = workCanvas.height;
         
+        // Adaptive lighting for dark images (improves readability on dark skin/low exposure)
+        this.applyAdaptiveLighting(wctx, w, h);
+
         // Apply sharpening filter for better readability
-        this.sharpenImage(croppedCtx, finalCropWidth, finalCropHeight);
+        this.sharpenImage(wctx, w, h);
         
         // Convert to data URL with maximum quality for OCR readability
-        return croppedCanvas.toDataURL('image/jpeg', 1.0);
+        return workCanvas.toDataURL('image/jpeg', 1.0);
+    }
+
+    // Crop a canvas to an ROI defined with normalized coordinates (0..1)
+    cropToROI(srcCanvas, roi) {
+        if (!srcCanvas || !roi) return srcCanvas;
+        const sw = srcCanvas.width, sh = srcCanvas.height;
+        const sx = Math.max(0, Math.min(sw, Math.round((roi.x ?? 0) * sw)));
+        const sy = Math.max(0, Math.min(sh, Math.round((roi.y ?? 0) * sh)));
+        const swidth = Math.max(1, Math.min(sw - sx, Math.round((roi.w ?? 1) * sw)));
+        const sheight = Math.max(1, Math.min(sh - sy, Math.round((roi.h ?? 1) * sh)));
+
+        const out = document.createElement('canvas');
+        out.width = swidth;
+        out.height = sheight;
+        const octx = out.getContext('2d', { alpha: false, desynchronized: true });
+        octx.drawImage(srcCanvas, sx, sy, swidth, sheight, 0, 0, swidth, sheight);
+        return out;
+    }
+    
+    // Analyze luminance and brighten/contrast-adjust if the crop is dark
+    applyAdaptiveLighting(ctx, width, height) {
+        try {
+            const imageData = ctx.getImageData(0, 0, width, height);
+            const data = imageData.data;
+
+            // Compute average luminance (Rec. 709)
+            let sumLum = 0;
+            const n = width * height;
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i], g = data[i + 1], b = data[i + 2];
+                const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                sumLum += lum;
+            }
+            const avgLum = sumLum / n;
+
+            // Determine adjustments based on brightness
+            // avgLum ~0..255. Below 80 -> strong brighten, below 110 -> mild
+            let gammaExp = 1.0; // exponent < 1 brightens
+            let contrast = 1.0; // linear contrast factor
+            let bias = 0;       // brightness bias
+            if (avgLum < 80) {
+                gammaExp = 0.7;
+                contrast = 1.15;
+                bias = 10;
+            } else if (avgLum < 110) {
+                gammaExp = 0.85;
+                contrast = 1.08;
+                bias = 6;
+            } else {
+                // No change for already bright images
+                return;
+            }
+
+            // Build LUTs for gamma and linear adjustment
+            const gammaLut = new Uint8ClampedArray(256);
+            for (let v = 0; v < 256; v++) {
+                // Gamma brighten: exponent < 1 boosts shadows
+                const g = Math.pow(v / 255, gammaExp) * 255;
+                gammaLut[v] = g > 255 ? 255 : (g < 0 ? 0 : g);
+            }
+
+            // Apply adjustments
+            for (let i = 0; i < data.length; i += 4) {
+                let r = gammaLut[data[i]];
+                let g = gammaLut[data[i + 1]];
+                let b = gammaLut[data[i + 2]];
+                // Contrast around mid-point 128 + bias
+                r = (r - 128) * contrast + 128 + bias;
+                g = (g - 128) * contrast + 128 + bias;
+                b = (b - 128) * contrast + 128 + bias;
+                data[i]     = r < 0 ? 0 : r > 255 ? 255 : r;
+                data[i + 1] = g < 0 ? 0 : g > 255 ? 255 : g;
+                data[i + 2] = b < 0 ? 0 : b > 255 ? 255 : b;
+                // Preserve alpha
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+        } catch (e) {
+            console.warn('Adaptive lighting skipped:', e);
+        }
     }
     
     sharpenImage(ctx, width, height) {

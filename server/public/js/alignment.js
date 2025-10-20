@@ -83,13 +83,33 @@ class AlignmentChecker {
         this.autoCaptureCountdown = this.autoCaptureTarget;
         
         this.countdownInterval = setInterval(() => {
+            // During countdown, ensure conditions are still good; otherwise cancel
+            if (window.cameraManager && window.cameraManager.isActive()) {
+                const frame = window.cameraManager.getCurrentFrame();
+                if (frame) {
+                    const focusCheck = this.checkFocus(frame);
+                    const positionCheck = this.checkPosition(frame);
+                    const brightnessCheck = this.checkBrightness(frame);
+                    const stillGood =
+                        focusCheck.status === 'good' &&
+                        positionCheck.status === 'good' &&
+                        brightnessCheck.status !== 'error';
+                    if (!stillGood) {
+                        this.resetCountdown();
+                        // Restore normal feedback UI
+                        this.updateOverallFeedback(this.calculateOverallStatus({
+                            focus: focusCheck, position: positionCheck, brightness: brightnessCheck
+                        }), { focus: focusCheck, position: positionCheck, brightness: brightnessCheck });
+                        return;
+                    }
+                }
+            }
+
             this.autoCaptureCountdown--;
-            
             if (this.autoCaptureCountdown <= 0) {
                 this.performAutoCapture();
                 this.resetCountdown();
             } else {
-                // Update UI with countdown
                 this.updateCountdownUI();
             }
         }, 1000);
@@ -99,6 +119,32 @@ class AlignmentChecker {
     
     performAutoCapture() {
         console.log('Auto-capturing image...');
+        // Final validation: ensure still focused and centered right before capture
+        if (!(window.cameraManager && window.cameraManager.isActive())) {
+            return;
+        }
+        const frame = window.cameraManager.getCurrentFrame();
+        if (frame) {
+            const focusCheck = this.checkFocus(frame);
+            const positionCheck = this.checkPosition(frame);
+            const brightnessCheck = this.checkBrightness(frame);
+            const allGood =
+                focusCheck.status === 'good' &&
+                positionCheck.status === 'good' &&
+                brightnessCheck.status !== 'error';
+
+            // If any check isn't good at the last moment, abort and restart countdown
+            if (!allGood) {
+                console.log('Capture aborted: conditions changed at the last moment', {
+                    focus: focusCheck, position: positionCheck, brightness: brightnessCheck
+                });
+                this.resetCountdown();
+                this.updateOverallFeedback(this.calculateOverallStatus({
+                    focus: focusCheck, position: positionCheck, brightness: brightnessCheck
+                }), { focus: focusCheck, position: positionCheck, brightness: brightnessCheck });
+                return;
+            }
+        }
         
         // Show capture flash
         const guideRect = document.querySelector('.guide-rectangle');
@@ -318,11 +364,11 @@ class AlignmentChecker {
         if (this.lastStatus !== overallStatus) {
             this.resetCountdown();
             this.lastStatus = overallStatus;
-            
-            // Start countdown if status is good
-            if (overallStatus === 'good' && this.autoCaptureEnabled) {
-                this.startCountdown();
-            }
+        }
+
+        // Start countdown only when conditions are good and not already counting
+        if (overallStatus === 'good' && this.autoCaptureEnabled && !this.countdownInterval) {
+            this.startCountdown();
         }
         
         // Only update UI if not in countdown mode

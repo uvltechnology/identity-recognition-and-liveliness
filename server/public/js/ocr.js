@@ -2,9 +2,18 @@ class OCRProcessor {
     constructor() {
         this.apiBaseUrl = window.location.origin + '/api/ocr';
         this.currentRequest = null;
+        this.surnameVariants = null; // cached list from server JSON
+        this.nameVariants = null; // cached NAME label variants JSON
+        this.middleVariants = null; // cached MIDDLE label variants JSON
         
         this.initializeElements();
         this.setupEventListeners();
+        // Lazy-load surname variants
+        this.loadSurnameVariants();
+        // Lazy-load name variants
+        this.loadNameVariants();
+        // Lazy-load middle variants
+        this.loadMiddleVariants();
     }
 
     initializeElements() {
@@ -16,6 +25,54 @@ class OCRProcessor {
 
     setupEventListeners() {
         // No file upload listeners needed
+    }
+
+    async loadSurnameVariants() {
+        try {
+            const url = `${window.location.origin}/json/surname_one_edit_28chars.array.json`;
+            const res = await fetch(url, { cache: 'no-store' });
+            if (!res.ok) return;
+            const arr = await res.json();
+            if (Array.isArray(arr)) {
+                // Normalize: uppercase and trim
+                this.surnameVariants = new Set(arr.map(s => String(s || '').toUpperCase().trim()));
+                this.surnameVariants.add('SURNAME');
+            }
+        } catch (e) {
+            console.warn('Failed to load surname variants JSON:', e);
+        }
+    }
+
+    async loadNameVariants() {
+        try {
+            const url = `${window.location.origin}/json/name_one_edit_28chars.array.json`;
+            const res = await fetch(url, { cache: 'no-store' });
+            if (!res.ok) return;
+            const arr = await res.json();
+            if (Array.isArray(arr)) {
+                this.nameVariants = new Set(arr.map(s => String(s || '').toUpperCase().trim()));
+                this.nameVariants.add('NAME');
+                this.nameVariants.add('NAMES');
+            }
+        } catch (e) {
+            console.warn('Failed to load name variants JSON:', e);
+        }
+    }
+
+    async loadMiddleVariants() {
+        try {
+            const url = `${window.location.origin}/json/middle_one_edit_28chars.array.json`;
+            const res = await fetch(url, { cache: 'no-store' });
+            if (!res.ok) return;
+            const arr = await res.json();
+            if (Array.isArray(arr)) {
+                this.middleVariants = new Set(arr.map(s => String(s || '').toUpperCase().trim()));
+                this.middleVariants.add('MIDDLE');
+                this.middleVariants.add('MIDDLENAME');
+            }
+        } catch (e) {
+            console.warn('Failed to load middle variants JSON:', e);
+        }
     }
 
     async processImageData(imageDataUrl) {
@@ -140,6 +197,7 @@ class OCRProcessor {
     displayIdentityResults(container, result) {
         const applyNationalIdRules = this.isNationalIdSelected();
         const applyPassportRules = this.isPassportSelected();
+        const applyUmidRules = this.isUmidSelected();
         // Display extracted identity fields first
         if (result.fields) {
             // Also try to populate the details form from server-side extracted fields
@@ -190,6 +248,10 @@ class OCRProcessor {
             // Passport-specific extraction rules
             if (applyPassportRules) {
                 this.fillPassportFromWords(result.basicText.words);
+            }
+            // UMID-specific hook (stub for now)
+            if (applyUmidRules) {
+                this.fillUmidFromWords(result.basicText.words);
             }
         }
 
@@ -381,8 +443,16 @@ class OCRProcessor {
                 // Count digits in the next segment (allowing letters like 'M')
                 const digitCount = (tail.match(/\d/g) || []).length;
                 if (digitCount >= 8) {
-                    // Take everything before 'PHL' as the passport ID number (alphanumeric only)
-                    let before = t.slice(0, idx).replace(/[^A-Za-z0-9]/g, '');
+                    // Take everything before 'PHL' as the passport ID number,
+                    // but if the character immediately before 'PHL' is a digit (e.g., '5PHL'),
+                    // drop that trailing digit (MRZ check digit) before cleaning.
+                    let beforeRaw = t.slice(0, idx);
+                    const charBefore = up[idx - 1];
+                    if (/[0-9]/.test(charBefore)) {
+                        // remove the last digit adjacent to PHL
+                        beforeRaw = beforeRaw.replace(/\d\s*$/, '');
+                    }
+                    let before = beforeRaw.replace(/[^A-Za-z0-9]/g, '');
                     // Prefer 8-12 characters; accept >= 6 as fallback
                     if (before.length >= 8) return before;
                     if (before.length >= 6) return before;
@@ -879,6 +949,454 @@ class OCRProcessor {
         return String(sel.value).toLowerCase() === 'passport';
     }
 
+    // Helper: Only apply UMID rules when ID Type is UMID
+    isUmidSelected() {
+        const sel = document.getElementById('id-type');
+        if (!sel) return false;
+        return String(sel.value).toLowerCase() === 'umid';
+    }
+
+    // UMID: stub to be implemented with extraction rules
+    fillUmidFromWords(words) {
+        if (!this.isUmidSelected()) return;
+        if (!Array.isArray(words) || words.length === 0) return;
+        // Extract last name based on pattern after CRN -> '-' -> number -> (label) -> LastName
+        const lastName = this.extractUmidLastName(words);
+        const firstName = this.extractUmidFirstName(words);
+        const idNumber = this.extractUmidIdNumber(words);
+        const birthDate = this.extractUmidBirthDateFromWords(words);
+        if (lastName || firstName || idNumber || birthDate) {
+            this.fillDetailsForm({ idType: 'umid', lastName: lastName || undefined, firstName: firstName || undefined, idNumber: idNumber || undefined, birthDate: birthDate || undefined });
+        }
+        console.log('[UMID] Detected words:', words.length, 'LastName:', lastName || '(none)', 'FirstName:', firstName || '(none)', 'ID:', idNumber || '(none)', 'Birth:', birthDate || '(none)');
+    }
+
+    // UMID-only: Extract last name by scanning for a SURNAME-like label anywhere,
+    // then taking the next plausible token as the last name (no CRN dependency).
+    extractUmidLastName(words) {
+        if (!Array.isArray(words) || words.length === 0) return null;
+
+        const raw = (t) => (t || '').toString().trim();
+        const alpha = (t) => raw(t).toUpperCase().replace(/[^A-Z]/g, '');
+        const isDash = (t) => /^[-–—]+$/.test(raw(t));
+        // Helper to decide if a token is itself a label-like word we should not capture
+        const isLabelToken = (t) => {
+            const u = alpha(t);
+            if (!u) return false;
+            // Direct label synonyms
+            const base = new Set(['SURNAME','LASTNAME','LAST','FAMILY','FAMILYNAME','APELYIDO','APELLIDO','NAME','NAMES','GIVEN','GIVENAME','GIVENNAMES','MIDDLE','MIDDLENAME','GITNANG']);
+            if (base.has(u)) return true;
+            // JSON-provided variants
+            if (this.surnameVariants && this.surnameVariants.has(u)) return true;
+            if (this.nameVariants && this.nameVariants.has(u)) return true;
+            if (this.middleVariants && this.middleVariants.has(u)) return true;
+            return false;
+        };
+        // Levenshtein distance for fuzzy matching of label tokens
+        const lev = (a, b) => {
+            const m = a.length, n = b.length;
+            const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+            for (let i = 0; i <= m; i++) dp[i][0] = i;
+            for (let j = 0; j <= n; j++) dp[0][j] = j;
+            for (let i = 1; i <= m; i++) {
+                for (let j = 1; j <= n; j++) {
+                    const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+                    dp[i][j] = Math.min(
+                        dp[i - 1][j] + 1,
+                        dp[i][j - 1] + 1,
+                        dp[i - 1][j - 1] + cost
+                    );
+                }
+            }
+            return dp[m][n];
+        };
+        const isLikelyLabel = (t) => {
+            const u = alpha(t); // letters only, uppercase
+            if (!u) return false;
+
+            // Direct matches and common synonyms
+            if (
+                u === 'SURNAME' || u === 'LASTNAME' || u === 'LAST' || u === 'NAME' ||
+                u === 'FAMILY' || u === 'FAMILYNAME' || u === 'APELYIDO' || u === 'APELLIDO'
+            ) return true;
+
+            // Known OCR variants close to SURNAME
+            const known = new Set(['SURNME','SURMAME','SURMANE','SURNM','SRNAME','SURNAMES','SURNAUS','SURANME','SURNEM','SURNASSE']);
+            if (known.has(u)) return true;
+
+            // JSON-provided variants
+            if (this.surnameVariants && this.surnameVariants.has(u)) return true;
+
+            // Vowel-stripped abbreviation check (e.g., SURNM -> SRNM)
+            const vowelless = u.replace(/[AEIOU]/g, '');
+            if (vowelless === 'SRNM' || vowelless === 'SRNME' || vowelless === 'SRNAM') return true;
+
+            // Pattern-based allowance for short degraded forms beginning with SURN
+            if (/^SURN[A-Z]*M?E?$/.test(u)) return true;
+
+            // Levenshtein distance relative to SURNAME
+            const base = 'SURNAME';
+            const distance = lev(u, base);
+            const relative = distance / base.length;
+            if (distance <= 2 || relative <= 0.34) return true;
+
+            return false;
+        };
+        const stopWords = new Set(['OMEN','GIVEN','GIVENAME','GIVENNAMES','NAME','NAMES','SURNAME','LAST','LASTNAME','APELYIDO','FAMILY','FAMILYNAME','MIDDLE','MIDDLENAME','GITNANG','BIRTH','DATE','OF','CRN','CARD']);
+        const cleanName = (s) => raw(s).replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, '').replace(/\s+/g, ' ').trim();
+        const isPlausibleName = (t) => {
+            const u = alpha(t);
+            if (stopWords.has(u)) return false; // skip noisy label-like tokens
+            if (isLabelToken(t)) return false; // skip any token recognized as label via variants
+            if (u.length < 2) return false; // must have at least 2 Latin letters
+            if (/\d/.test(raw(t))) return false; // no digits in names
+            return true;
+        };
+
+        const isRepublicish = (t) => {
+            const u = alpha(t);
+            // Accept common variants from English and Filipino plus OCR misses
+            return ['REPUBLIC','REPUBLICA','REPUBLIKA','PUBLIKA','REPUB','REPUBLlC','REPUBL1C','FIL','PIL'].includes(u);
+        };
+        const isIdLabel = (t) => alpha(t) === 'ID';
+        const isGivenLabel = (t) => alpha(t) === 'GIVEN';
+        const isStarToken = (t) => raw(t) === '*';
+
+        // Single, generic scan: find the first SURNAME-like label, then return the next plausible token
+        for (let i = 0; i < words.length; i++) {
+            if (!isLikelyLabel(words[i]?.text)) continue;
+
+            // Special case: if tokens after SURNAME show Republic header, skip to ID and take next as last name
+            let j = i + 1;
+            let republicWindow = 0;
+            let sawRepublic = false;
+            while (j < words.length && republicWindow < 6) {
+                const tk = words[j]?.text;
+                if (!tk) { j++; republicWindow++; continue; }
+                const u = alpha(tk);
+                if (isRepublicish(tk) || u === 'OF' || u === 'THE' || u === 'PHILIPPINES' || u === 'NG' || u === 'PILIPINAS' || u === 'NO' || u === 'PIL') {
+                    sawRepublic = true;
+                    j++; republicWindow++;
+                    continue;
+                }
+                break;
+            }
+
+            if (sawRepublic) {
+                // Find an ID label ahead and collect name tokens after it (skip '*'), stop at CRN/GIVEN, up to 5 tokens
+                let k = j; // continue forward from where republic header ended
+                let idIdx = -1;
+                for (; k < Math.min(words.length, j + 20); k++) {
+                    if (isIdLabel(words[k]?.text)) { idIdx = k; break; }
+                }
+                if (idIdx !== -1) {
+                    let p = idIdx + 1;
+                    // Skip a standalone '*'
+                    if (p < words.length && isStarToken(words[p]?.text)) p++;
+                    const parts = [];
+                    while (p < words.length && parts.length < 5) {
+                        const tk2 = words[p]?.text || '';
+                        if (!tk2) { p++; continue; }
+                        if (isDash(tk2) || isLikelyLabel(tk2) || isLabelToken(tk2) || isGivenLabel(tk2)) break;
+                        const up2 = alpha(tk2);
+                        if (up2 === 'CRN') break; // boundary for star/ID path
+                        if (isStarToken(tk2)) { p++; continue; }
+                        if (isPlausibleName(tk2)) {
+                            parts.push(cleanName(tk2));
+                        } else {
+                            // if non-plausible, end collection
+                            break;
+                        }
+                        p++;
+                    }
+                    if (parts.length) return parts.join(' ');
+                }
+                // If not found, fall back to generic scanning below starting from i+1
+            }
+
+            // If immediate token after SURNAME is 'FIL', look for '*' then collect next tokens as last name until CRN
+            const nextTok = words[i + 1]?.text;
+            if (nextTok && alpha(nextTok) === 'FIL') {
+                let s = i + 1;
+                let starIdx = -1;
+                for (; s < Math.min(words.length, i + 20); s++) {
+                    if (isStarToken(words[s]?.text)) { starIdx = s; break; }
+                }
+                if (starIdx !== -1) {
+                    let p = starIdx + 1;
+                    const parts = [];
+                    while (p < words.length && parts.length < 5) {
+                        const tk2 = words[p]?.text || '';
+                        if (!tk2) { p++; continue; }
+                        const up2 = alpha(tk2);
+                        if (up2 === 'CRN') break; // boundary for star path
+                        if (isDash(tk2) || isStarToken(tk2) || isLikelyLabel(tk2) || isLabelToken(tk2)) { p++; continue; }
+                        if (!isPlausibleName(tk2)) break;
+                        parts.push(cleanName(tk2));
+                        p++;
+                    }
+                    if (parts.length) return parts.join(' ');
+                }
+            }
+
+            // Generic: collect up to 5 plausible tokens after SURNAME until 'GIVEN' (or CRN) boundary
+            j = i + 1;
+            const parts = [];
+            let hops = 0;
+            while (j < words.length && hops < 20 && parts.length < 5) {
+                const tk = words[j]?.text;
+                if (!tk) { j++; hops++; continue; }
+                if (isGivenLabel(tk)) break; // stop at GIVEN for surname path
+                const up = alpha(tk);
+                if (up === 'CRN') break; // also stop at CRN if encountered
+                if (isDash(tk) || isStarToken(tk) || isLikelyLabel(tk) || isLabelToken(tk)) { j++; hops++; continue; }
+                if (!isPlausibleName(tk)) break;
+                parts.push(cleanName(tk));
+                j++; hops++;
+            }
+            if (parts.length) return parts.join(' ');
+        }
+        // Fallback 1: If no SURNAME-based result, try an ID-based path anywhere in the text
+        for (let i = 0; i < words.length; i++) {
+            if (!isIdLabel(words[i]?.text)) continue;
+            let p = i + 1;
+            if (p < words.length && isStarToken(words[p]?.text)) p++; // optional '*'
+            const parts = [];
+            while (p < words.length && parts.length < 5) {
+                const tk = words[p]?.text || '';
+                if (!tk) { p++; continue; }
+                const up = alpha(tk);
+                if (up === 'CRN') break; // boundary
+                if (isDash(tk) || isStarToken(tk) || isLikelyLabel(tk) || isLabelToken(tk) || isGivenLabel(tk)) break;
+                if (!isPlausibleName(tk)) break;
+                parts.push(cleanName(tk));
+                p++;
+            }
+            if (parts.length) return parts.join(' ');
+        }
+
+        // Fallback 2: if no SURNAME or ID-based result, try to locate a CRN hyphenated number and take the next plausible token as last name
+        // Example: CRN - 0113-0294096-4 PEJANA ...
+        const isHyphenatedCrn = (t) => /^(\d{4})-(\d{7})-(\d)$/.test(alpha(t).replace(/[^0-9\-]/g, ''));
+        for (let i = 0; i < words.length; i++) {
+            const up = alpha(words[i]?.text);
+            if (up === 'CRN') {
+                // scan next tokens for a hyphenated CRN number
+                for (let j = i + 1; j < Math.min(words.length, i + 6); j++) {
+                    const token = words[j]?.text || '';
+                    const cleaned = String(token).trim();
+                    const digitsHyph = cleaned.replace(/[^0-9\-]/g, '');
+                    if (/^(\d{4})-(\d{7})-(\d)$/.test(digitsHyph)) {
+                        // Take next plausible token after this number
+                        if (j + 1 < words.length) {
+                            const nextTok = words[j + 1]?.text;
+                            if (nextTok && isPlausibleName(nextTok)) {
+                                const cand = cleanName(nextTok);
+                                if (cand) return cand;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    // UMID: First name immediately after a NAME-like label; robust to OCR misspellings using JSON variants
+    extractUmidFirstName(words) {
+        if (!Array.isArray(words) || words.length === 0) return null;
+
+        const raw = (t) => (t || '').toString().trim();
+        const upAlpha = (t) => raw(t).toUpperCase().replace(/[^A-Z]/g, '');
+        const isDash = (t) => /^[-–—]+$/.test(raw(t));
+
+        const lev = (a, b) => {
+            a = String(a || '').toUpperCase();
+            b = String(b || '').toUpperCase();
+            const m = a.length, n = b.length;
+            const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+            for (let i = 0; i <= m; i++) dp[i][0] = i;
+            for (let j = 0; j <= n; j++) dp[0][j] = j;
+            for (let i = 1; i <= m; i++) {
+                for (let j = 1; j <= n; j++) {
+                    const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+                    dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+                }
+            }
+            return dp[m][n];
+        };
+
+        const isLikelyNameLabel = (t) => {
+            const up = upAlpha(t);
+            if (!up) return false;
+            if (this.nameVariants && this.nameVariants.has(up)) return true;
+            if (up === 'NAME' || up === 'NAMES') return true;
+            const vowless = up.replace(/[AEIOU]/g, '');
+            if (vowless === 'NM' || vowless === 'NMS') return true;
+            if (lev(up, 'NAME') <= 1 || lev(up, 'NAMES') <= 1) return true;
+            return false;
+        };
+
+        const isLikelyMiddleLabel = (t) => {
+            const up = upAlpha(t);
+            if (!up) return false;
+            if (this.middleVariants && this.middleVariants.has(up)) return true;
+            if (up === 'MIDDLE' || up === 'MIDDLE NAME' || up === 'MIDDLENAME') return true;
+            const vowless = up.replace(/[AEIOU]/g, '');
+            if (vowless === 'MDDL' || vowless === 'MDDLNME') return true;
+            if (lev(up, 'MIDDLE') <= 1 || lev(up, 'MIDDLENAME') <= 2) return true;
+            return false;
+        };
+
+        const isStop = (t) => {
+            const up = upAlpha(t);
+            if (!up) return true;
+            // Skip common labels or non-name tokens
+            if (['CRN','ID','CARD','BIRTH','DATE','OF','SURNAME','APELYIDO','LAST','FAMILY','MIDDLE','GITNANG','GIVEN','GIVENAME','GIVENNAMES','PASAPORTE','PHL','FIRSTNAME','FIRST'].includes(up)) return true;
+            // Skip any token present in our known label-variant sets
+            if (this.surnameVariants && this.surnameVariants.has(up)) return true;
+            if (this.nameVariants && this.nameVariants.has(up)) return true;
+            if (this.middleVariants && this.middleVariants.has(up)) return true;
+            return false;
+        };
+        const isPlausible = (t) => {
+            const up = upAlpha(t);
+            if (!up) return false;
+            if (isStop(up)) return false;
+            // First name typically alphabetic, allow hyphen/apostrophe trimmed out
+            return /^[A-Z]{2,30}$/.test(up);
+        };
+
+        for (let i = 0; i < words.length; i++) {
+            if (!isLikelyNameLabel(words[i]?.text)) continue;
+            let j = i + 1, hops = 0;
+            const parts = [];
+            while (j < words.length && hops < 12) {
+                const cand = words[j]?.text || '';
+                // Stop at the middle-name label boundary
+                if (isLikelyMiddleLabel(cand)) break;
+                if (!cand || isDash(cand) || isLikelyNameLabel(cand) || isStop(cand)) { j++; hops++; continue; }
+                // Special-case: If the second token (relative to the NAME label) looks like '*DLE' (e.g., HODLE/ADDLE)
+                // and the following token is 'NAME', interpret it as a degraded 'MIDDLE NAME' label.
+                // In that case, do not include the '*DLE' token and stop, keeping only the first token collected.
+                if (parts.length >= 1) {
+                    const up = upAlpha(cand);
+                    const nextUp = upAlpha(words[j + 1]?.text || '');
+                    if ((up === 'HODLE' || up === 'ADDLE' || /DLE$/.test(up) || /OLE$/.test(up)) && nextUp === 'NAME') {
+                        break;
+                    }
+                }
+                if (isPlausible(cand)) {
+                    parts.push(raw(cand).replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, ''));
+                    if (parts.length >= 3) break; // cap at 3 tokens
+                }
+                j++; hops++;
+            }
+            if (parts.length) return parts.join(' ').replace(/\s+/g, ' ').trim();
+        }
+        return null;
+    }
+
+    // UMID: Extract ID number using CRN anchor and 4-7-1 pattern: XXXX-XXXXXXX-X
+    extractUmidIdNumber(words) {
+        if (!Array.isArray(words) || words.length === 0) return null;
+        const raw = (t) => (t || '').toString().trim();
+        const up = (t) => raw(t).toUpperCase();
+
+        const formatDigitsToCRN = (digitsOnly) => {
+            // Expect 12 digits for 4-7-1
+            const d = String(digitsOnly || '').replace(/\D/g, '');
+            if (d.length < 12) return null;
+            const slice = d.slice(0, 12);
+            return `${slice.slice(0,4)}-${slice.slice(4,11)}-${slice.slice(11)}`;
+        };
+
+        const normalizeCandidate = (s) => {
+            if (!s) return null;
+            const cleaned = String(s).replace(/[^0-9\-]/g, '');
+            // If already hyphenated correctly
+            const m = cleaned.match(/^(\d{4})-(\d{7})-(\d{1})$/);
+            if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+            // If digits and other separators present, try formatting
+            const fallback = formatDigitsToCRN(cleaned);
+            return fallback;
+        };
+
+        // Pass 1: look for a token that itself contains CRN and digits
+        for (let i = 0; i < words.length; i++) {
+            const t = up(words[i]?.text);
+            if (!t) continue;
+            const m = t.match(/^CRN\W*([0-9\-]{5,})/i);
+            if (m) {
+                const formatted = normalizeCandidate(m[1]);
+                if (formatted) return `CRN-${formatted}`;
+            }
+        }
+
+        // Pass 2: find a standalone CRN token, then assemble from next few tokens
+        for (let i = 0; i < words.length; i++) {
+            const t = up(words[i]?.text);
+            if (t === 'CRN') {
+                // Gather up to next 4 tokens to build candidate
+                let buffer = '';
+                for (let j = i + 1; j < Math.min(words.length, i + 6); j++) {
+                    const seg = raw(words[j]?.text);
+                    if (!seg) continue;
+                    buffer += (buffer ? '' : '') + seg;
+                    const try1 = normalizeCandidate(buffer);
+                    if (try1) return `CRN-${try1}`;
+                    // Also try current segment alone
+                    const try2 = normalizeCandidate(seg);
+                    if (try2) return `CRN-${try2}`;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // UMID: Extract birth date. Prefer the token(s) after 'BIRTH'; fallback to any YYYY/MM/DD-like token anywhere.
+    extractUmidBirthDateFromWords(words) {
+        if (!Array.isArray(words) || words.length === 0) return null;
+        const raw = (t) => (t || '').toString().trim();
+        const isBirth = (t) => /\bbirth\b/i.test(raw(t));
+
+        // 1) Prefer sequence immediately after a 'BIRTH' token
+        let birthIdx = -1;
+        for (let i = 0; i < words.length; i++) {
+            if (isBirth(words[i]?.text)) { birthIdx = i; break; }
+        }
+        if (birthIdx !== -1) {
+            const tail = words.slice(birthIdx + 1, Math.min(words.length, birthIdx + 1 + 5))
+                .map(w => raw(w?.text))
+                .filter(Boolean);
+            // Try single tokens first
+            for (const tok of tail) {
+                const iso = this.normalizeDate(tok);
+                if (iso) return iso;
+            }
+            // Then try small windows (2..3 tokens)
+            for (let win = 2; win <= Math.min(3, tail.length); win++) {
+                for (let s = 0; s + win <= tail.length; s++) {
+                    const joined = tail.slice(s, s + win).join(' ');
+                    const iso = this.normalizeDate(joined);
+                    if (iso) return iso;
+                }
+            }
+        }
+
+        // 2) Fallback: scan any token for a normalizable date (e.g., 1999/03/07 or 1999-03-07)
+        for (let i = 0; i < words.length; i++) {
+            const t = raw(words[i]?.text);
+            if (!t) continue;
+            const iso = this.normalizeDate(t);
+            if (iso) return iso;
+        }
+
+        return null;
+    }
+
     createFieldsSection(fields) {
         const section = document.createElement('div');
         section.className = 'result-section fields-highlight';
@@ -889,12 +1407,6 @@ class OCRProcessor {
         titleElement.style.cssText = 'color: #0369a1; font-size: 1.1rem; font-weight: bold; margin-bottom: 12px;';
         
         let titleText = '📋 Extracted Identity Fields';
-        if (fields.source === 'ai-vision') {
-            titleText += ' ✅ <span style="color: #16a34a; font-size: 0.85rem;">(AI Vision-Verified)</span>';
-        } else if (fields.source === 'ai-text') {
-            titleText += ' <span style="color: #2563eb; font-size: 0.85rem;">(AI-Powered)</span>';
-        }
-        
         titleElement.innerHTML = titleText;
 
         const fieldsGrid = document.createElement('div');

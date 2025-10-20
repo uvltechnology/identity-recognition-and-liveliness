@@ -36,6 +36,8 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Serve static files from public directory
 app.use(express.static(path.join(__dirname, '../public')));
+// Serve JSON resources (e.g., SURNAME variants) to the client
+app.use('/json', express.static(path.join(__dirname, 'json')));
 
 // routes
 app.get('/health', (req, res) => res.json({ ok: true }));
@@ -99,14 +101,10 @@ app.post('/api/ocr/identity', upload.single('image'), async (req, res) => {
       return res.json(ocrResult);
     }
 
-    // Extract structured identity fields using AI (TEXT-ONLY)
-    const useAI = String(process.env.OPENAI_USE || 'false').toLowerCase() === 'true';
-    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-    
   const rawText = ocrResult.basicText?.text || ocrResult.structuredText?.text || '';
   const idType = req.body?.idType || 'national-id';
     
-  const fields = await extractIdentityFromText(rawText, { useAI, model, idType });
+  const fields = await extractIdentityFromText(rawText, { idType });
 
     res.json({
       success: true,
@@ -150,12 +148,8 @@ app.post('/api/ocr/base64', async (req, res) => {
         result = await ocrService.extractIdentityText(imageBuffer);
         
         if (result.success) {
-          // Extract structured identity fields using AI (TEXT-ONLY)
-          const useAI = String(process.env.OPENAI_USE || 'false').toLowerCase() === 'true';
-          const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-          
           const rawText = result.basicText?.text || result.structuredText?.text || '';
-          const fields = await extractIdentityFromText(rawText, { useAI, model, idType: idType || 'national-id' });
+          const fields = await extractIdentityFromText(rawText, { idType: idType || 'national-id' });
           
           result.fields = fields;
           result.rawText = rawText;
