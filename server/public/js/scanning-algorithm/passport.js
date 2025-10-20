@@ -54,6 +54,72 @@
       return String(sel.value).toLowerCase() === 'passport';
     },
 
+    async fillFromText(text) {
+      if (!this.isSelected()) return;
+      if (!text) return;
+      const rawText = (text || '').replace(/\u0000/g, ' ').trim();
+
+      // AI-first: request Passport fields
+      let aiFirstName, aiLastName, aiBirthDate, aiIdNumber, aiConfidence;
+      try {
+        if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+          window.ocrProcessor.showAIStatus('Requesting AI extraction (Passport)…');
+        }
+        const resp = await fetch('/api/ai/passport/parse', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rawText })
+        });
+        if (resp.status === 501) {
+          if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+            window.ocrProcessor.showAIStatus('AI disabled on server. Set GEMINI_API_KEY in .env and restart.');
+          }
+        } else if (!resp.ok) {
+          let errPayload = null; try { errPayload = await resp.json(); } catch {}
+          const extra = errPayload?.details ? ` Details: ${errPayload.details}` : '';
+          if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+            window.ocrProcessor.showAIStatus(`AI request failed (HTTP ${resp.status}).${extra} Using OCR rules.`);
+          }
+        } else {
+          const data = await resp.json();
+          if (data && data.success && data.fields) {
+            aiFirstName = data.fields.firstName || undefined;
+            aiLastName = data.fields.lastName || undefined;
+            aiBirthDate = data.fields.birthDate || undefined;
+            aiIdNumber = data.fields.idNumber || undefined;
+            aiConfidence = data.confidence;
+            if (window.ocrProcessor && typeof window.ocrProcessor.showAIResultsDL === 'function') {
+              window.ocrProcessor.showAIResultsDL({ firstName: aiFirstName, lastName: aiLastName, birthDate: aiBirthDate, idNumber: aiIdNumber, confidence: aiConfidence });
+            }
+            if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+              window.ocrProcessor.showAIStatus('AI extraction complete (Passport).');
+            }
+          } else if (data && data.raw) {
+            if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+              window.ocrProcessor.showAIStatus('AI responded, but no fields were parsed (Passport).');
+            }
+            const aiPanel = document.getElementById('ai-results-container');
+            if (aiPanel) {
+              const pre = document.createElement('pre');
+              pre.style.cssText = 'white-space: pre-wrap; background: #f8fafc; padding: 8px; border-radius: 6px; border: 1px solid #e2e8f0;';
+              pre.textContent = data.raw;
+              aiPanel.innerHTML = '';
+              aiPanel.appendChild(pre);
+            }
+          }
+        }
+      } catch (e) {
+        if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+          window.ocrProcessor.showAIStatus('AI network error (Passport). Using OCR rules.');
+        }
+      }
+
+      // If AI provided fields, fill the form now
+      if (window.ocrProcessor && (aiLastName || aiFirstName || aiIdNumber || aiBirthDate)) {
+        window.ocrProcessor.fillDetailsForm({ idType: 'passport', lastName: aiLastName, firstName: aiFirstName, idNumber: aiIdNumber, birthDate: aiBirthDate });
+        return;
+      }
+    },
+
     fillFromWords(words) {
       if (!this.isSelected()) return;
       if (!Array.isArray(words) || words.length === 0) return;
@@ -232,7 +298,7 @@
     },
 
     // Extract birth date from tokens after 'birth' as DD MON YYYY or search globally for that pattern
-    extractBirthDate(words) {
+  extractBirthDate(words) {
       if (!Array.isArray(words) || words.length === 0) return null;
 
       const isBirth = (t) => /\bbirth\b/i.test(raw(t));

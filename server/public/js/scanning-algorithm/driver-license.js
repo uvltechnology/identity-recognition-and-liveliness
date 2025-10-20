@@ -2,6 +2,90 @@
   // Driver's License scanning and extraction module
   // Exposes window.DriverLicense with isSelected, fillFromText, fillFromWords
 
+  // Simple in-memory cache to avoid duplicate AI calls on the same OCR text
+  const aiCache = { lastRaw: null, lastResult: null };
+
+  // Aggregate OCR texts (basic + structured) and call AI once with the richest input
+  const aiAggregate = {
+    texts: [],
+    timer: null,
+    inFlight: null,
+    combined: null,
+    result: null
+  };
+
+  const debounce = (fn, ms) => {
+    return (...args) => new Promise(resolve => {
+      if (aiAggregate.timer) clearTimeout(aiAggregate.timer);
+      aiAggregate.timer = setTimeout(async () => {
+        const out = await fn(...args);
+        resolve(out);
+      }, ms);
+    });
+  };
+
+  const combineTexts = (arr) => {
+    // Prefer the longest text; if similar length, join unique lines
+    const sorted = [...arr].sort((a, b) => (b?.length || 0) - (a?.length || 0));
+    const longest = sorted[0] || '';
+    const second = sorted[1] || '';
+    if (second && Math.abs(longest.length - second.length) < 50) {
+      const lines = new Set((longest + '\n' + second).split(/\r?\n/).map(s => s.trim()).filter(Boolean));
+      return Array.from(lines).join('\n');
+    }
+    return longest;
+  };
+
+  const requestAIOnce = async (rawCombined) => {
+    // cache by combined content
+    if (aiCache.lastRaw && aiCache.lastRaw === rawCombined && aiCache.lastResult) {
+      return aiCache.lastResult;
+    }
+    try {
+      if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+        window.ocrProcessor.showAIStatus('Requesting AI extraction…');
+      }
+      const resp = await fetch('/api/ai/driver-license/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rawText: rawCombined })
+      });
+      if (resp.status === 501) {
+        if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+          window.ocrProcessor.showAIStatus('AI disabled on server. Set GEMINI_API_KEY in .env and restart.');
+        }
+        return null;
+      }
+      if (!resp.ok) {
+        let errPayload = null;
+        try { errPayload = await resp.json(); } catch {}
+        if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+          const extra = errPayload?.details ? ` Details: ${errPayload.details}` : '';
+          window.ocrProcessor.showAIStatus(`AI request failed (HTTP ${resp.status}).${extra} Using OCR rules.`);
+        }
+        return errPayload || { success: false, error: `HTTP ${resp.status}` };
+      }
+      const data = await resp.json();
+      aiCache.lastRaw = rawCombined;
+      aiCache.lastResult = data;
+      return data;
+    } catch (e) {
+      if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+        window.ocrProcessor.showAIStatus('AI network error. Using OCR rules.');
+      }
+      return null;
+    }
+  };
+
+  const scheduleAI = debounce(async () => {
+    aiAggregate.inFlight = true;
+    aiAggregate.combined = combineTexts(aiAggregate.texts);
+    const data = await requestAIOnce(aiAggregate.combined);
+    aiAggregate.result = data;
+    aiAggregate.inFlight = false;
+    return data;
+  }, 120);
+
   const monthToNumber = (name) => {
     const map = {
       jan: '01', january: '01',
@@ -54,86 +138,154 @@
       return String(sel.value).toLowerCase() === 'driver-license';
     },
 
-    fillFromText(text) {
+    async fillFromText(text) {
       // Only run when Driver's License is selected
-      if (!this.isSelected()) return;
+      if (!this.isSelected()) {
+        // If another ID type is selected (e.g., UMID), do not emit any AI status.
+        // Just exit quietly so other modules can render their own AI messages.
+        return;
+      }
       if (!text) return;
       const raw = text.replace(/\u0000/g, ' ').trim();
+      // Keep at most 2 unique text variants (e.g., basic + structured)
+      if (!aiAggregate.texts.includes(raw)) {
+        aiAggregate.texts.push(raw);
+        if (aiAggregate.texts.length > 2) aiAggregate.texts.shift();
+      }
+      // Debounce to wait for both Basic and Structured texts
+  const aiData = await scheduleAI();
+
+      let aiFirstName, aiLastName, aiBirthDate, aiIdNumber;
+      if (aiData && aiData.success && aiData.fields) {
+        aiFirstName = aiData.fields.firstName || undefined;
+        aiLastName = aiData.fields.lastName || undefined;
+        aiBirthDate = aiData.fields.birthDate || undefined;
+        aiIdNumber = aiData.fields.idNumber || undefined;
+        if (window.ocrProcessor && typeof window.ocrProcessor.showAIResultsDL === 'function') {
+          window.ocrProcessor.showAIResultsDL({
+            firstName: aiFirstName,
+            lastName: aiLastName,
+            birthDate: aiBirthDate,
+            idNumber: aiIdNumber,
+            confidence: aiData.confidence
+          });
+          if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+            window.ocrProcessor.showAIStatus('AI extraction complete.');
+          }
+        }
+      } else if (aiData && aiData.raw) {
+        if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+          window.ocrProcessor.showAIStatus('AI responded, but no fields were parsed. Showing raw AI output below.');
+        }
+        if (window.ocrProcessor && typeof window.ocrProcessor.showAIResultsDL === 'function') {
+          window.ocrProcessor.showAIResultsDL({
+            firstName: undefined,
+            lastName: undefined,
+            birthDate: undefined,
+            idNumber: undefined,
+            confidence: aiData.confidence
+          });
+        }
+        const aiPanel = document.getElementById('ai-results-container');
+        if (aiPanel) {
+          const pre = document.createElement('pre');
+          pre.style.cssText = 'white-space: pre-wrap; background: #f8fafc; padding: 8px; border-radius: 6px; border: 1px solid #e2e8f0;';
+          pre.textContent = aiData.raw;
+          aiPanel.innerHTML = '';
+          aiPanel.appendChild(pre);
+        }
+  }
+
+  // Only compute heuristics as fallback for missing fields
+      const needFirst = !aiFirstName;
+      const needLast = !aiLastName;
+      const needDob = !aiBirthDate;
+      const needId = !aiIdNumber;
+
+      let idNumber, birthDate, lastName, firstName;
       const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
       const lower = raw.toLowerCase();
 
-      let idNumber; // driver's license number
-      // Preferred: exact pattern XXX-XX-XXXXXX anywhere in text
-      const idPattern = /\b([A-Z0-9]{3})-([A-Z0-9]{2})-([A-Z0-9]{6})\b/i;
-      let mPat = raw.match(idPattern);
-      if (mPat) {
-        idNumber = `${mPat[1].toUpperCase()}-${mPat[2].toUpperCase()}-${mPat[3].toUpperCase()}`;
-      }
-      // Common labels: DLN, LICENSE NO, LIC NO, NO., ID NO., ID NUMBER
-      if (!idNumber) {
-        const labelRe = /(?:DLN|DRIVER'?S?\s*LICENSE(?:\s*NO\.?)?|LICENSE\s*NO\.?|LIC\.?\s*NO\.?|ID\s*NO\.?|ID\s*NUMBER|NO\.)/i;
-        for (const line of lines) {
-          if (labelRe.test(line)) {
-            const m = line.match(/(?:DLN|DRIVER'?S?\s*LICENSE(?:\s*NO\.?)?|LICENSE\s*NO\.?|LIC\.?\s*NO\.?|ID\s*NO\.?|ID\s*NUMBER|NO\.)[:\s-]*([A-Z0-9\- ]{5,})/i);
-            if (m) {
-              const captured = clean(m[1]).replace(/\s+/g, '').toUpperCase();
-              // If captured matches pattern directly, use it; else try hyphenation from 11 chars
-              const direct = captured.match(/^([A-Z0-9]{3})-([A-Z0-9]{2})-([A-Z0-9]{6})$/);
-              if (direct) {
-                idNumber = `${direct[1]}-${direct[2]}-${direct[3]}`;
-              } else {
-                const plain = captured.replace(/[^A-Z0-9]/g, '');
-                if (plain.length >= 11) {
-                  const core = plain.slice(0, 11);
-                  const a = core.slice(0, 3), b = core.slice(3, 5), c = core.slice(5, 11);
-                  if (/^[A-Z0-9]{3}$/.test(a) && /^[A-Z0-9]{2}$/.test(b) && /^[A-Z0-9]{6}$/.test(c)) {
-                    idNumber = `${a}-${b}-${c}`;
+      if (needId) {
+        const idPattern = /\b([A-Z0-9]{3})-([A-Z0-9]{2})-([A-Z0-9]{6})\b/i;
+        let mPat = raw.match(idPattern);
+        if (mPat) {
+          idNumber = `${mPat[1].toUpperCase()}-${mPat[2].toUpperCase()}-${mPat[3].toUpperCase()}`;
+        }
+        if (!idNumber) {
+          const labelRe = /(?:DLN|DRIVER'?S?\s*LICENSE(?:\s*NO\.?)?|LICENSE\s*NO\.?.?|LIC\.?\s*NO\.?.?|ID\s*NO\.?.?|ID\s*NUMBER|NO\.)/i;
+          for (const line of lines) {
+            if (labelRe.test(line)) {
+              const m = line.match(/(?:DLN|DRIVER'?S?\s*LICENSE(?:\s*NO\.?)?|LICENSE\s*NO\.?.?|LIC\.?\s*NO\.?.?|ID\s*NO\.?.?|ID\s*NUMBER|NO\.)[:\s-]*([A-Z0-9\- ]{5,})/i);
+              if (m) {
+                const captured = clean(m[1]).replace(/\s+/g, '').toUpperCase();
+                const direct = captured.match(/^([A-Z0-9]{3})-([A-Z0-9]{2})-([A-Z0-9]{6})$/);
+                if (direct) {
+                  idNumber = `${direct[1]}-${direct[2]}-${direct[3]}`;
+                } else {
+                  const plain = captured.replace(/[^A-Z0-9]/g, '');
+                  if (plain.length >= 11) {
+                    const core = plain.slice(0, 11);
+                    const a = core.slice(0, 3), b = core.slice(3, 5), c = core.slice(5, 11);
+                    if (/^[A-Z0-9]{3}$/.test(a) && /^[A-Z0-9]{2}$/.test(b) && /^[A-Z0-9]{6}$/.test(c)) {
+                      idNumber = `${a}-${b}-${c}`;
+                    }
                   }
                 }
+                if (idNumber) break;
               }
-              if (idNumber) break;
             }
           }
         }
+        if (!idNumber) {
+          const plain = (raw.match(/[A-Z0-9]{11,}/ig) || []).map(s => s.toUpperCase());
+          for (const s of plain) {
+            const a = s.slice(0, 3), b = s.slice(3, 5), c = s.slice(5, 11);
+            if (s.length >= 11 && /^[A-Z0-9]{3}$/.test(a) && /^[A-Z0-9]{2}$/.test(b) && /^[A-Z0-9]{6}$/.test(c)) {
+              idNumber = `${a}-${b}-${c}`; break;
+            }
+          }
+        }
+      } else if (aiData && aiData.success === false && aiData.error) {
+        const extra = aiData.details ? ` Details: ${aiData.details}` : '';
+        if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+          window.ocrProcessor.showAIStatus(`AI error: ${aiData.error}.${extra} Falling back to OCR rules.`);
+        }
       }
-      // Fallback: any plain 11-char alnum that can format to 3-2-6
-      if (!idNumber) {
-        const plain = (raw.match(/[A-Z0-9]{11,}/ig) || []).map(s => s.toUpperCase());
-        for (const s of plain) {
-          const a = s.slice(0, 3), b = s.slice(3, 5), c = s.slice(5, 11);
-          if (s.length >= 11 && /^[A-Z0-9]{3}$/.test(a) && /^[A-Z0-9]{2}$/.test(b) && /^[A-Z0-9]{6}$/.test(c)) {
-            idNumber = `${a}-${b}-${c}`; break;
+
+      if (needDob) {
+        const dobMatch = raw.match(/\b(?:birth\s*date|date\s*of\s*birth|dob)[:\s-]*([A-Za-z0-9 ,\/.\-]+)/i);
+        if (dobMatch) {
+          const tail = clean(dobMatch[1]);
+          birthDate = normalizeDate(tail) || tail;
+        }
+      }
+
+      if (needLast || needFirst) {
+        for (const line of lines) {
+          const l = line.toLowerCase();
+          if (needLast && /\b(surname|last\s*name)\b/.test(l)) {
+            lastName = clean(line.split(/:|\-|–|—/).slice(1).join(':') || line.replace(/.*?(surname|last\s*name)\b[:\s-]*/i, ''));
+          }
+          if (needFirst && /\b(given\s*name|first\s*name)\b/.test(l)) {
+            firstName = clean(line.split(/:|\-|–|—/).slice(1).join(':') || line.replace(/.*?(given\s*name|first\s*name)\b[:\s-]*/i, ''));
           }
         }
       }
 
-      let birthDate;
-      // Keywords: Birth Date, DOB, Date of Birth
-      const dobMatch = raw.match(/\b(?:birth\s*date|date\s*of\s*birth|dob)[:\s-]*([A-Za-z0-9 ,\/.\-]+)/i);
-      if (dobMatch) {
-        const tail = clean(dobMatch[1]);
-        birthDate = normalizeDate(tail) || tail;
-      }
-
-      // Names: try lines with Surname/First Name or generic sequence
-      let lastName; let firstName;
-      for (const line of lines) {
-        const l = line.toLowerCase();
-        if (/\b(surname|last\s*name)\b/.test(l)) {
-          lastName = clean(line.split(/:|\-|–|—/).slice(1).join(':') || line.replace(/.*?(surname|last\s*name)\b[:\s-]*/i, ''));
+  if (window.ocrProcessor && typeof window.ocrProcessor.fillDetailsForm === 'function') {
+        const payload = {};
+        const mergedFirst = aiFirstName || firstName;
+        const mergedLast = aiLastName || lastName;
+        const mergedDob = aiBirthDate || birthDate;
+        const mergedId = aiIdNumber || idNumber;
+        if (mergedFirst) payload.firstName = mergedFirst;
+        if (mergedLast) payload.lastName = mergedLast;
+        if (mergedDob) payload.birthDate = mergedDob;
+        if (mergedId) payload.idNumber = mergedId;
+        if (Object.keys(payload).length > 0) {
+          window.ocrProcessor.fillDetailsForm(payload);
         }
-        if (/\b(given\s*name|first\s*name)\b/.test(l)) {
-          firstName = clean(line.split(/:|\-|–|—/).slice(1).join(':') || line.replace(/.*?(given\s*name|first\s*name)\b[:\s-]*/i, ''));
-        }
-      }
-
-      if (window.ocrProcessor && typeof window.ocrProcessor.fillDetailsForm === 'function') {
-        window.ocrProcessor.fillDetailsForm({
-          firstName: firstName || undefined,
-          lastName: lastName || undefined,
-          birthDate: birthDate || undefined,
-          idNumber: idNumber || undefined,
-        });
       }
     },
 
@@ -362,12 +514,14 @@
       if (!firstName && firstIdx !== -1 && tokens[firstIdx + 1]) firstName = tokens.slice(firstIdx + 1, firstIdx + 3).join(' ').replace(/[,:;]+$/g, '').trim();
 
       if (window.ocrProcessor && typeof window.ocrProcessor.fillDetailsForm === 'function') {
-        window.ocrProcessor.fillDetailsForm({
-          firstName: firstName || undefined,
-          lastName: lastName || undefined,
-          birthDate: birthDate || undefined,
-          idNumber: idNumber || undefined,
-        });
+        const payload = {};
+        if (firstName) payload.firstName = firstName;
+        if (lastName) payload.lastName = lastName;
+        if (birthDate) payload.birthDate = birthDate;
+        if (idNumber) payload.idNumber = idNumber;
+        if (Object.keys(payload).length > 0) {
+          window.ocrProcessor.fillDetailsForm(payload);
+        }
       }
     }
   };

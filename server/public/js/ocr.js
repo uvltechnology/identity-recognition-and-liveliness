@@ -197,7 +197,7 @@ class OCRProcessor {
     displayIdentityResults(container, result) {
     const applyNationalIdRules = this.isNationalIdSelected();
     const applyPassportRules = this.isPassportSelected();
-    const applyDriverLicenseRules = this.isDriverLicenseSelected?.() || (document.getElementById('id-type') && String(document.getElementById('id-type').value).toLowerCase() === 'driver-license');
+    // Driver's License gating moved into driver-license.js (DriverLicense.isSelected)
     const applyPhilHealthRules = this.isPhilHealthSelected ? this.isPhilHealthSelected() : (document.getElementById('id-type') && String(document.getElementById('id-type').value).toLowerCase() === 'philhealth');
         // UMID condition: flips true only when the "ID Type" dropdown (#id-type) value is 'umid'
         // This toggles all UMID-specific extraction in fillUmidFromWords()
@@ -225,13 +225,21 @@ class OCRProcessor {
             if (applyNationalIdRules && window.NationalID && typeof window.NationalID.fillFromText === 'function') {
                 window.NationalID.fillFromText(result.basicText.text);
             }
+            // Passport parsing
+            if (applyPassportRules && window.Passport && typeof window.Passport.fillFromText === 'function') {
+                window.Passport.fillFromText(result.basicText.text);
+            }
             // PhilHealth parsing
             if (applyPhilHealthRules && window.PhilHealth && typeof window.PhilHealth.fillFromText === 'function') {
                 window.PhilHealth.fillFromText(result.basicText.text);
             }
-            // Driver's License parsing (only when selected)
-            if (applyDriverLicenseRules && window.DriverLicense && typeof window.DriverLicense.fillFromText === 'function') {
+            // Driver's License parsing: let module self-gate via isSelected()
+            if (window.DriverLicense && typeof window.DriverLicense.fillFromText === 'function') {
                 window.DriverLicense.fillFromText(result.basicText.text);
+            }
+            // UMID parsing
+            if (applyUmidRules && window.UMID && typeof window.UMID.fillFromText === 'function') {
+                window.UMID.fillFromText(result.basicText.text);
             }
         }
 
@@ -243,11 +251,17 @@ class OCRProcessor {
             if (applyNationalIdRules && window.NationalID && typeof window.NationalID.fillFromText === 'function') {
                 window.NationalID.fillFromText(result.structuredText.text);
             }
+            if (applyPassportRules && window.Passport && typeof window.Passport.fillFromText === 'function') {
+                window.Passport.fillFromText(result.structuredText.text);
+            }
             if (applyPhilHealthRules && window.PhilHealth && typeof window.PhilHealth.fillFromText === 'function') {
                 window.PhilHealth.fillFromText(result.structuredText.text);
             }
-            if (applyDriverLicenseRules && window.DriverLicense && typeof window.DriverLicense.fillFromText === 'function') {
+            if (window.DriverLicense && typeof window.DriverLicense.fillFromText === 'function') {
                 window.DriverLicense.fillFromText(result.structuredText.text);
+            }
+            if (applyUmidRules && window.UMID && typeof window.UMID.fillFromText === 'function') {
+                window.UMID.fillFromText(result.structuredText.text);
             }
         }
 
@@ -265,7 +279,7 @@ class OCRProcessor {
             if (applyPhilHealthRules && window.PhilHealth && typeof window.PhilHealth.fillFromWords === 'function') {
                 window.PhilHealth.fillFromWords(result.basicText.words);
             }
-            if (applyDriverLicenseRules && window.DriverLicense && typeof window.DriverLicense.fillFromWords === 'function') {
+            if (window.DriverLicense && typeof window.DriverLicense.fillFromWords === 'function') {
                 window.DriverLicense.fillFromWords(result.basicText.words);
             }
 
@@ -515,6 +529,129 @@ class OCRProcessor {
         section.appendChild(contentElement);
 
         return section;
+    }
+
+    // Show AI results for Driver's License below OCR results and in AI Results panel
+    showAIResultsDL({ firstName, lastName, birthDate, idNumber, confidence }) {
+        try {
+            const container = this.resultsContainer;
+            const aiPanel = document.getElementById('ai-results-container');
+            if (!container && !aiPanel) return;
+            // Replace existing AI section if present
+            const old = document.getElementById('ai-dl-section');
+            if (old && old.parentNode) old.parentNode.removeChild(old);
+
+            // Only render if at least one field exists
+            const hasAny = !!(firstName || lastName || birthDate || idNumber);
+            if (!hasAny) return;
+
+            const aiSection = document.createElement('div');
+            aiSection.id = 'ai-dl-section';
+            aiSection.className = 'result-section';
+
+            const titleEl = document.createElement('div');
+            titleEl.className = 'result-title';
+            const typeLabel = this.isDriverLicenseSelected()
+                ? "Driver's License"
+                : this.isUmidSelected()
+                    ? 'UMID'
+                    : this.isPhilHealthSelected()
+                        ? 'PhilHealth'
+                        : this.isPassportSelected()
+                            ? 'Passport'
+                            : this.isNationalIdSelected()
+                                ? 'National ID'
+                                : 'Identity Document';
+            titleEl.textContent = `🤖 AI extraction (${typeLabel})`;
+            aiSection.appendChild(titleEl);
+
+            // Grid of fields similar to createFieldsSection
+            const fieldsGrid = document.createElement('div');
+            fieldsGrid.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;';
+
+            const rows = [
+                ['👤 First Name', firstName],
+                ['👤 Last Name', lastName],
+                ['📅 Birth Date', birthDate],
+                ['🆔 ID Number', idNumber]
+            ];
+
+            rows.forEach(([label, value]) => {
+                const fieldDiv = document.createElement('div');
+                fieldDiv.style.cssText = 'background: white; padding: 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);';
+                fieldDiv.innerHTML = `
+                    <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 4px;">${label}</div>
+                    <div style="font-size: 1rem; font-weight: 600; color: ${value ? '#0f172a' : '#94a3b8'};">
+                        ${value || 'Not found'}
+                    </div>
+                `;
+                fieldsGrid.appendChild(fieldDiv);
+            });
+
+            // Confidence indicator (optional)
+            if (confidence !== undefined) {
+                const confDiv = document.createElement('div');
+                confDiv.style.cssText = 'background: white; padding: 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);';
+                confDiv.innerHTML = `
+                    <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 4px;">⚡ Confidence</div>
+                    <div style="font-size: 1rem; font-weight: 600; color: #0f172a;">
+                        ${confidence}
+                    </div>
+                `;
+                fieldsGrid.appendChild(confDiv);
+            }
+
+            aiSection.appendChild(fieldsGrid);
+            // Append to OCR results container if available
+            if (container) container.appendChild(aiSection);
+
+            // Also render a compact version inside the AI Results panel if present
+            if (aiPanel) {
+                const compact = document.createElement('div');
+                compact.className = 'rounded-md bg-white p-3 shadow-sm';
+                const rows = [
+                    ['First Name', firstName],
+                    ['Last Name', lastName],
+                    ['Birth Date', birthDate],
+                    ['ID Number', idNumber]
+                ];
+                compact.innerHTML = rows.map(([k, v]) => `
+                    <div class="flex items-center justify-between border-b border-gray-100 py-1 last:border-b-0">
+                        <span class="text-gray-500">${k}</span>
+                        <span class="font-semibold text-gray-900">${v || '—'}</span>
+                    </div>
+                `).join('') + (confidence !== undefined ? `
+                    <div class="mt-2 text-xs text-gray-500">Confidence: ${confidence}</div>
+                ` : '');
+
+                // Also show raw AI JSON (the extracted fields) for clarity
+                const rawJson = document.createElement('pre');
+                rawJson.className = 'mt-3 whitespace-pre-wrap rounded-md bg-gray-50 p-2 text-xs text-gray-700 border border-gray-200';
+                const jsonObj = { firstName, lastName, birthDate, idNumber, confidence };
+                rawJson.textContent = JSON.stringify(jsonObj, null, 2);
+
+                aiPanel.innerHTML = '';
+                aiPanel.appendChild(compact);
+                aiPanel.appendChild(rawJson);
+            }
+        } catch (e) {
+            console.warn('Failed to render AI DL results:', e);
+        }
+    }
+
+    // Show a simple status or error message in the AI results panel
+    showAIStatus(message) {
+        try {
+            const aiPanel = document.getElementById('ai-results-container');
+            if (!aiPanel) return;
+            const box = document.createElement('div');
+            box.className = 'rounded-md bg-yellow-50 p-3 text-sm text-yellow-800 border border-yellow-200';
+            box.textContent = message;
+            aiPanel.innerHTML = '';
+            aiPanel.appendChild(box);
+        } catch (e) {
+            console.warn('Failed to render AI status:', e);
+        }
     }
 
     formatWordsList(words) {

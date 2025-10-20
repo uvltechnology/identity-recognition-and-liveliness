@@ -30,36 +30,120 @@
       return String(sel.value).toLowerCase() === 'philhealth';
     },
 
-    fillFromText(text) {
+    async fillFromText(text) {
       if (!this.isSelected()) return; // only when PhilHealth is selected
       if (!text) return;
       const raw = text.replace(/\u0000/g, ' ').trim();
       const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
 
-      let idNumber;
-      // 1) Direct hyphenated match
-      for (const line of lines) {
-        const m = line.match(/\b(\d{2})-(\d{9})-(\d)\b/);
-        if (m) { idNumber = `${m[1]}-${m[2]}-${m[3]}`; break; }
+      // AI-first: call server Gemini endpoint
+      let aiFirstName, aiLastName, aiBirthDate, aiIdNumber, aiConfidence;
+      try {
+        if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+          window.ocrProcessor.showAIStatus('Requesting AI extraction (PhilHealth)…');
+        }
+        const resp = await fetch('/api/ai/philhealth/parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rawText: raw })
+        });
+        if (resp.status === 501) {
+          if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+            window.ocrProcessor.showAIStatus('AI disabled on server. Set GEMINI_API_KEY in .env and restart.');
+          }
+        } else if (!resp.ok) {
+          let errPayload = null; try { errPayload = await resp.json(); } catch {}
+          const extra = errPayload?.details ? ` Details: ${errPayload.details}` : '';
+          if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+            window.ocrProcessor.showAIStatus(`AI request failed (HTTP ${resp.status}).${extra} Using OCR rules.`);
+          }
+        } else {
+          const data = await resp.json();
+          if (data && data.success && data.fields) {
+            aiFirstName = data.fields.firstName || undefined;
+            aiLastName = data.fields.lastName || undefined;
+            aiBirthDate = data.fields.birthDate || undefined;
+            aiIdNumber = data.fields.idNumber || undefined;
+            aiConfidence = data.confidence;
+            if (window.ocrProcessor && typeof window.ocrProcessor.showAIResultsDL === 'function') {
+              // Re-use DL renderer to display fields in the AI Results panel
+              window.ocrProcessor.showAIResultsDL({
+                firstName: aiFirstName,
+                lastName: aiLastName,
+                birthDate: aiBirthDate,
+                idNumber: aiIdNumber,
+                confidence: aiConfidence
+              });
+            }
+            if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+              window.ocrProcessor.showAIStatus('AI extraction complete (PhilHealth).');
+            }
+          } else if (data && data.raw) {
+            if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+              window.ocrProcessor.showAIStatus('AI responded, but no fields were parsed (PhilHealth).');
+            }
+            const aiPanel = document.getElementById('ai-results-container');
+            if (aiPanel) {
+              const pre = document.createElement('pre');
+              pre.style.cssText = 'white-space: pre-wrap; background: #f8fafc; padding: 8px; border-radius: 6px; border: 1px solid #e2e8f0;';
+              pre.textContent = data.raw;
+              aiPanel.innerHTML = '';
+              aiPanel.appendChild(pre);
+            }
+          }
+        }
+      } catch (e) {
+        if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+          window.ocrProcessor.showAIStatus('AI network error (PhilHealth). Using OCR rules.');
+        }
       }
-      // 2) Plain digits fallback (12+ contiguous digits)
+
+      // Fallback heuristics for any missing fields
+      let idNumber = aiIdNumber;
       if (!idNumber) {
-        const m = raw.match(/\b\d{12,}\b/);
-        if (m) idNumber = normalizePhilHealthId(m[0]);
-      }
-      // 3) Label-based capture: HPN, PHILHEALTH NUMBER, PHIC NO
-      if (!idNumber) {
-        const labelRe = /(?:PHILHEALTH|PHIC|HPN|NO\.?|NUMBER)/i;
+        // 1) Direct hyphenated match
         for (const line of lines) {
-          if (labelRe.test(line)) {
-            const m = line.match(/(?:PHILHEALTH|PHIC|HPN|NO\.?|NUMBER)[:\s-]*([0-9\- ]{6,})/i);
-            if (m) { idNumber = normalizePhilHealthId(m[1]); if (idNumber) break; }
+          const m = line.match(/\b(\d{2})-(\d{9})-(\d)\b/);
+          if (m) { idNumber = `${m[1]}-${m[2]}-${m[3]}`; break; }
+        }
+        // 2) Plain digits fallback (12+ contiguous digits)
+        if (!idNumber) {
+          const m = raw.match(/\b\d{12,}\b/);
+          if (m) idNumber = normalizePhilHealthId(m[0]);
+        }
+        // 3) Label-based capture: HPN, PHILHEALTH NUMBER, PHIC NO
+        if (!idNumber) {
+          const labelRe = /(?:PHILHEALTH|PHIC|HPN|NO\.?|NUMBER)/i;
+          for (const line of lines) {
+            if (labelRe.test(line)) {
+              const m = line.match(/(?:PHILHEALTH|PHIC|HPN|NO\.?|NUMBER)[:\s-]*([0-9\- ]{6,})/i);
+              if (m) { idNumber = normalizePhilHealthId(m[1]); if (idNumber) break; }
+            }
           }
         }
       }
 
-      if (idNumber && window.ocrProcessor && typeof window.ocrProcessor.fillDetailsForm === 'function') {
-        window.ocrProcessor.fillDetailsForm({ idType: 'philhealth', idNumber });
+      // Names and birth date heuristics (very simple, as PhilHealth layouts vary)
+      let lastName = aiLastName;
+      let firstName = aiFirstName;
+      let birthDate = aiBirthDate;
+      if (!lastName || !firstName) {
+        // Try common "LASTNAME, FIRSTNAME ..." line
+        const nameLine = lines.find(l => /,/.test(l) && /[A-Za-z]/.test(l));
+        if (nameLine) {
+          const parts = nameLine.split(',');
+          if (!lastName && parts[0]) lastName = clean(parts[0]);
+          if (!firstName && parts[1]) firstName = clean(parts[1]).split(/\s+/).slice(0,2).join(' ');
+        }
+      }
+      if (!birthDate) {
+        // Look for YYYY/MM/DD or Month DD, YYYY around lines
+        const dobMatch = raw.match(/\b(\d{4})[\/-](0[1-9]|1[0-2])[\/-]([0-2]?\d|3[01])\b/);
+        if (dobMatch) birthDate = `${dobMatch[1]}-${dobMatch[2]}-${String(dobMatch[3]).padStart(2,'0')}`;
+      }
+
+      if ((idNumber || lastName || firstName || birthDate) && window.ocrProcessor && typeof window.ocrProcessor.fillDetailsForm === 'function') {
+        window.ocrProcessor.fillDetailsForm({ idType: 'philhealth', idNumber: idNumber || undefined, lastName: lastName || undefined, firstName: firstName || undefined, birthDate: birthDate || undefined });
       }
     },
 
