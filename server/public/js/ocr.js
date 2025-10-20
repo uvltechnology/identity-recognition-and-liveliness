@@ -195,8 +195,10 @@ class OCRProcessor {
     }
 
     displayIdentityResults(container, result) {
-        const applyNationalIdRules = this.isNationalIdSelected();
-        const applyPassportRules = this.isPassportSelected();
+    const applyNationalIdRules = this.isNationalIdSelected();
+    const applyPassportRules = this.isPassportSelected();
+    const applyDriverLicenseRules = this.isDriverLicenseSelected?.() || (document.getElementById('id-type') && String(document.getElementById('id-type').value).toLowerCase() === 'driver-license');
+    const applyPhilHealthRules = this.isPhilHealthSelected ? this.isPhilHealthSelected() : (document.getElementById('id-type') && String(document.getElementById('id-type').value).toLowerCase() === 'philhealth');
         // UMID condition: flips true only when the "ID Type" dropdown (#id-type) value is 'umid'
         // This toggles all UMID-specific extraction in fillUmidFromWords()
         const applyUmidRules = this.isUmidSelected();
@@ -223,6 +225,14 @@ class OCRProcessor {
             if (applyNationalIdRules && window.NationalID && typeof window.NationalID.fillFromText === 'function') {
                 window.NationalID.fillFromText(result.basicText.text);
             }
+            // PhilHealth parsing
+            if (applyPhilHealthRules && window.PhilHealth && typeof window.PhilHealth.fillFromText === 'function') {
+                window.PhilHealth.fillFromText(result.basicText.text);
+            }
+            // Driver's License parsing (only when selected)
+            if (applyDriverLicenseRules && window.DriverLicense && typeof window.DriverLicense.fillFromText === 'function') {
+                window.DriverLicense.fillFromText(result.basicText.text);
+            }
         }
 
         if (result.structuredText && result.structuredText.text) {
@@ -232,6 +242,12 @@ class OCRProcessor {
             // Attempt parsing from structured text as well (fallback/merge)
             if (applyNationalIdRules && window.NationalID && typeof window.NationalID.fillFromText === 'function') {
                 window.NationalID.fillFromText(result.structuredText.text);
+            }
+            if (applyPhilHealthRules && window.PhilHealth && typeof window.PhilHealth.fillFromText === 'function') {
+                window.PhilHealth.fillFromText(result.structuredText.text);
+            }
+            if (applyDriverLicenseRules && window.DriverLicense && typeof window.DriverLicense.fillFromText === 'function') {
+                window.DriverLicense.fillFromText(result.structuredText.text);
             }
         }
 
@@ -245,6 +261,12 @@ class OCRProcessor {
             // Priority fill: Use specific word indices per request (delegated)
             if (applyNationalIdRules && window.NationalID && typeof window.NationalID.fillFromWords === 'function') {
                 window.NationalID.fillFromWords(result.basicText.words);
+            }
+            if (applyPhilHealthRules && window.PhilHealth && typeof window.PhilHealth.fillFromWords === 'function') {
+                window.PhilHealth.fillFromWords(result.basicText.words);
+            }
+            if (applyDriverLicenseRules && window.DriverLicense && typeof window.DriverLicense.fillFromWords === 'function') {
+                window.DriverLicense.fillFromWords(result.basicText.words);
             }
 
             // Passport-specific extraction handled by separate module (window.Passport)
@@ -376,6 +398,20 @@ class OCRProcessor {
         const sel = document.getElementById('id-type');
         if (!sel) return false;
         return String(sel.value).toLowerCase() === 'umid';
+    }
+
+    // Helper: Only apply Driver's License rules when selected
+    isDriverLicenseSelected() {
+        const sel = document.getElementById('id-type');
+        if (!sel) return false;
+        return String(sel.value).toLowerCase() === 'driver-license';
+    }
+
+    // Helper: Only apply PhilHealth rules when selected
+    isPhilHealthSelected() {
+        const sel = document.getElementById('id-type');
+        if (!sel) return false;
+        return String(sel.value).toLowerCase() === 'philhealth';
     }
 
     // UMID extraction moved to js/scanning-algorithm/umid.js
@@ -588,7 +624,7 @@ class OCRProcessor {
         }, 3000);
     }
 
-    // Clear the Extracted Details form inputs (called on recapture)
+    // Clear the Extracted Details form inputs (used by Recapture flow)
     clearExtractedDetails() {
         const idTypeEl = document.getElementById('id-type');
         const idNumEl = document.getElementById('id-number');
