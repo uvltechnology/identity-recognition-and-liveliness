@@ -357,10 +357,6 @@ app.get('/embed/session/:id', async (req, res) => {
                 <button class="btn btn-authorize" onclick="handleAuthorize(true)">
                   🔐 Authorize & Proceed
                 </button>
-                <br>
-                <button class="btn btn-skip" onclick="handleAuthorize(false)">
-                  ❌ Cancel Authorization
-                </button>
               </div>
               
               <div style="margin-top: 2rem; font-size: 0.8rem; color: #9ca3af;">
@@ -442,6 +438,9 @@ app.get('/embed/session/:id', async (req, res) => {
                 const targetOrigin = window.__IDENTITY_EXPECTED_ORIGIN__ || '*';
                 window.parent.postMessage(message, targetOrigin);
               }
+
+              // Update session on server (this will invoke cancel webhook)
+              updateSessionResult(result, false);
 
               // Close the window/iframe
               window.close();
@@ -540,9 +539,6 @@ app.get('/embed/session/:id', async (req, res) => {
                 <div class="auth-info">
                   The authorization choice has been recorded and sent to the parent application.
                 </div>
-                <button class="btn btn-skip" onclick="window.close()" style="margin-top: 1rem;">
-                  Close
-                </button>
               \`;
             }
           </script>
