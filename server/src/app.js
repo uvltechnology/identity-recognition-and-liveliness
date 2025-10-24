@@ -137,15 +137,15 @@ app.post('/api/ocr/identity', upload.single('image'), async (req, res) => {
 
     // Extract raw text using Google Vision OCR
     const ocrResult = await ocrService.extractIdentityText(req.file.buffer);
-    
+
     if (!ocrResult.success) {
       return res.json(ocrResult);
     }
 
-  const rawText = ocrResult.basicText?.text || ocrResult.structuredText?.text || '';
-  const idType = req.body?.idType || 'national-id';
-    
-  const fields = await extractIdentityFromText(rawText, { idType });
+    const rawText = ocrResult.basicText?.text || ocrResult.structuredText?.text || '';
+    const idType = req.body?.idType || 'national-id';
+
+    const fields = await extractIdentityFromText(rawText, { idType });
 
     res.json({
       success: true,
@@ -171,20 +171,20 @@ async function createVerifySessionHandler(req, res) {
     const sessionId = makeSessionId();
     const now = Date.now();
     // store minimal payload: who requested and optional customer id / returnTo
-  // Normalize/store requested fields: origin, idType, successUrl, webhooks, testMode
-  const storedPayload = { ...(payload || {}) };
-  if (payload.origin) storedPayload.origin = payload.origin;
-  if (payload.idType) storedPayload.idType = payload.idType;
-  if (payload.successUrl) storedPayload.successUrl = payload.successUrl;
-  // Optional webhook URLs that caller can provide to be notified on success or cancellation
-  if (payload.successWebhook) storedPayload.successWebhook = payload.successWebhook;
-  if (payload.cancelWebhook) storedPayload.cancelWebhook = payload.cancelWebhook;
-  // Test mode flag - when true, enables testing/debugging features
-  if (typeof payload.testMode === 'boolean') storedPayload.testMode = payload.testMode;
-  // Auth required flag - when true in test mode, requires authentication
-  if (typeof payload.authRequired === 'boolean') storedPayload.authRequired = payload.authRequired;
+    // Normalize/store requested fields: origin, idType, successUrl, webhooks, testMode
+    const storedPayload = { ...(payload || {}) };
+    if (payload.origin) storedPayload.origin = payload.origin;
+    if (payload.idType) storedPayload.idType = payload.idType;
+    if (payload.successUrl) storedPayload.successUrl = payload.successUrl;
+    // Optional webhook URLs that caller can provide to be notified on success or cancellation
+    if (payload.successWebhook) storedPayload.successWebhook = payload.successWebhook;
+    if (payload.cancelWebhook) storedPayload.cancelWebhook = payload.cancelWebhook;
+    // Test mode flag - when true, enables testing/debugging features
+    if (typeof payload.testMode === 'boolean') storedPayload.testMode = payload.testMode;
+    // Auth required flag - when true in test mode, requires authentication
+    if (typeof payload.authRequired === 'boolean') storedPayload.authRequired = payload.authRequired;
 
-  const sessionObj = { id: sessionId, createdAt: now, payload: storedPayload, status: 'pending' };
+    const sessionObj = { id: sessionId, createdAt: now, payload: storedPayload, status: 'pending' };
     const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 60 * 60);
     await setSession(sessionId, sessionObj, ttl);
 
@@ -295,7 +295,7 @@ app.get('/embed/session/:id', async (req, res) => {
     }
     // Check if this is test mode - if so, show only authorization buttons
     const isTestMode = session && session.payload && session.payload.testMode === true;
-    
+
     if (isTestMode) {
       // Show only authorization buttons for test mode
       const testModeHtml = `<!doctype html>
@@ -367,13 +367,15 @@ app.get('/embed/session/:id', async (req, res) => {
 
               // Add mock identity fields if authorized
               if (authorized) {
+                
                 result.fields = {
                   firstName: 'John',
                   lastName: 'Doe',
-                  idNumber: 'ID123456789',
+                  id_number: 'ID123456789', 
                   birthDate: '1990-01-15',
                   confidence: 'high',
-                  phone_number: '0912 345 6789'
+                  phone_number: '0912 345 6789',
+                  id_type: window.__IDENTITY_REQUESTED_ID_TYPE__
                 };
                 result.rawText = 'REPUBLIC OF THE PHILIPPINES\\nDRIVER\\'S LICENSE\\nLAST NAME: DOE\\nFIRST NAME: JOHN\\nID NO: ID123456789\\nBIRTH DATE: 01/15/1990\\nTEST MODE SAMPLE DATA';
               }
@@ -452,7 +454,7 @@ app.get('/embed/session/:id', async (req, res) => {
           </script>
         </body>
       </html>`;
-      
+
       return res.set('Content-Type', 'text/html; charset=utf-8').send(testModeHtml);
     }
 
@@ -798,11 +800,11 @@ app.get('/api/verify/session/:id/temp', async (req, res) => {
       }
     }
 
-        // Resolve image URL (S3 presign or local URL) via storage helper
-        let imageUrl = null;
-        try {
-          imageUrl = await getImageUrlFromRef(imageRef);
-        } catch (e) { /* ignore */ }
+    // Resolve image URL (S3 presign or local URL) via storage helper
+    let imageUrl = null;
+    try {
+      imageUrl = await getImageUrlFromRef(imageRef);
+    } catch (e) { /* ignore */ }
 
     return res.json({ success: true, imageRef, imageUrl, ocr });
   } catch (e) {
@@ -856,7 +858,7 @@ app.post('/api/ocr/base64', async (req, res) => {
                 if (oa.success && oa.parsed) {
                   // Merge in parsed fields but do not overwrite existing non-null values
                   const merged = { ...(result.fields || {}) };
-                  for (const k of ['firstName','lastName','idNumber','birthDate','confidence']) {
+                  for (const k of ['firstName', 'lastName', 'idNumber', 'birthDate', 'confidence']) {
                     const v = oa.parsed[k];
                     if (v !== undefined && v !== null && (merged[k] === undefined || merged[k] === null || merged[k] === '')) {
                       merged[k] = v;
@@ -913,7 +915,7 @@ app.post('/api/ocr/base64', async (req, res) => {
                 await setSession(sid, existing, ttlSeconds);
               }
             }
-            
+
 
             // Update session status/result and notify webhooks if terminal
             try {
@@ -974,7 +976,7 @@ app.use((error, req, res, next) => {
       });
     }
   }
-  
+
   console.error('Unhandled error:', error);
   res.status(500).json({
     success: false,

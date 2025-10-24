@@ -89,6 +89,22 @@
             padding-left: 16px;
             font-size: 12px;
         }
+        
+        .sidebar-nav .subsections {
+            margin: 0.25rem 0;
+            padding: 0;
+            list-style: none;
+        }
+        
+        .sidebar-nav .sub-subsection {
+            color: #9ca3af;
+            font-size: 11px;
+            padding-left: 32px;
+        }
+        
+        .sidebar-nav .sub-subsection:hover {
+            color: #3b82f6;
+        }
 
         @media (max-width: 1024px) {
             .main-container {
@@ -723,7 +739,10 @@ window.addEventListener('message', function(event) {
                 <h2 id="examples">Code Examples</h2>
                 
                 <h3 id="react-example">React Integration</h3>
-                <p>Complete React component with TypeScript support and error handling:</p>
+                <p>Complete React component with TypeScript support, hooks, and error handling:</p>
+                
+                <!-- Basic React Component -->
+                <h4 id="react-basic-component">Basic React Component</h4>
                 <div class="code-block with-lines">
                     <div class="line-numbers">
                         <div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div>10</div>
@@ -737,6 +756,445 @@ window.addEventListener('message', function(event) {
                         <div>81</div><div>82</div><div>83</div><div>84</div><div>85</div><div>86</div><div>87</div><div>88</div><div>89</div><div>90</div>
                         <div>91</div><div>92</div><div>93</div><div>94</div><div>95</div><div>96</div><div>97</div><div>98</div><div>99</div><div>100</div>
                         <div>101</div><div>102</div><div>103</div><div>104</div><div>105</div><div>106</div><div>107</div><div>108</div><div>109</div><div>110</div>
+                        <div>111</div><div>112</div><div>113</div><div>114</div><div>115</div><div>116</div><div>117</div><div>118</div><div>119</div><div>120</div>
+                        <div>121</div><div>122</div><div>123</div><div>124</div><div>125</div>
+                    </div>
+                    <div class="code-content">
+<span style="color: #c792ea;">import</span> <span style="color: #82aaff;">React</span>, { 
+  <span style="color: #82aaff;">useEffect</span>, 
+  <span style="color: #82aaff;">useRef</span>, 
+  <span style="color: #82aaff;">useState</span>, 
+  <span style="color: #82aaff;">useCallback</span> 
+} <span style="color: #c792ea;">from</span> <span style="color: #c3e88d;">'react'</span>;
+
+<span style="color: #7c7c7c;">// TypeScript interface for identity data</span>
+<span style="color: #c792ea;">interface</span> <span style="color: #ffcb6b;">IdentityData</span> {
+  <span style="color: #82aaff;">firstName</span>: <span style="color: #c792ea;">string</span>;
+  <span style="color: #82aaff;">lastName</span>: <span style="color: #c792ea;">string</span>;
+  <span style="color: #82aaff;">idNumber</span>: <span style="color: #c792ea;">string</span>;
+  <span style="color: #82aaff;">birthDate</span>: <span style="color: #c792ea;">string</span>;
+  <span style="color: #82aaff;">confidence</span>: <span style="color: #c792ea;">string</span>;
+  <span style="color: #82aaff;">phone_number</span>?: <span style="color: #c792ea;">string</span>;
+  <span style="color: #82aaff;">id_type</span>: <span style="color: #c3e88d;">'national-id'</span> | <span style="color: #c3e88d;">'passport'</span> | <span style="color: #c3e88d;">'umid'</span>;
+  <span style="color: #82aaff;">action</span>: <span style="color: #c3e88d;">'success'</span> | <span style="color: #c3e88d;">'cancel'</span>;
+}
+
+<span style="color: #c792ea;">interface</span> <span style="color: #ffcb6b;">IdentityVerificationProps</span> {
+  <span style="color: #82aaff;">testMode</span>?: <span style="color: #c792ea;">boolean</span>;
+  <span style="color: #82aaff;">sessionId</span>?: <span style="color: #c792ea;">string</span>;
+  <span style="color: #82aaff;">idType</span>?: <span style="color: #c3e88d;">'national-id'</span> | <span style="color: #c3e88d;">'passport'</span> | <span style="color: #c3e88d;">'umid'</span>;
+  <span style="color: #82aaff;">baseUrl</span>?: <span style="color: #c792ea;">string</span>;
+  <span style="color: #82aaff;">onResult</span>: (<span style="color: #82aaff;">data</span>: <span style="color: #ffcb6b;">IdentityData</span>) => <span style="color: #c792ea;">void</span>;
+  <span style="color: #82aaff;">onError</span>?: (<span style="color: #82aaff;">error</span>: <span style="color: #c792ea;">string</span>) => <span style="color: #c792ea;">void</span>;
+  <span style="color: #82aaff;">onCancel</span>?: () => <span style="color: #c792ea;">void</span>;
+}
+
+<span style="color: #c792ea;">const</span> <span style="color: #82aaff;">IdentityVerification</span>: <span style="color: #ffcb6b;">React.FC</span>&lt;<span style="color: #ffcb6b;">IdentityVerificationProps</span>&gt; = ({
+  <span style="color: #82aaff;">testMode</span> = <span style="color: #f78c6c;">false</span>,
+  <span style="color: #82aaff;">sessionId</span>,
+  <span style="color: #82aaff;">idType</span> = <span style="color: #c3e88d;">'national-id'</span>,
+  <span style="color: #82aaff;">baseUrl</span> = <span style="color: #c3e88d;">'http://localhost:3000'</span>,
+  <span style="color: #82aaff;">onResult</span>,
+  <span style="color: #82aaff;">onError</span>,
+  <span style="color: #82aaff;">onCancel</span>
+}) => {
+  <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">iframeRef</span> = <span style="color: #82aaff;">useRef</span>&lt;<span style="color: #ffcb6b;">HTMLIFrameElement</span>&gt;(<span style="color: #f78c6c;">null</span>);
+  <span style="color: #c792ea;">const</span> [<span style="color: #82aaff;">isLoading</span>, <span style="color: #82aaff;">setIsLoading</span>] = <span style="color: #82aaff;">useState</span>(<span style="color: #f78c6c;">true</span>);
+  <span style="color: #c792ea;">const</span> [<span style="color: #82aaff;">error</span>, <span style="color: #82aaff;">setError</span>] = <span style="color: #82aaff;">useState</span>&lt;<span style="color: #c792ea;">string</span> | <span style="color: #c792ea;">null</span>&gt;(<span style="color: #f78c6c;">null</span>);
+
+  <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">handleMessage</span> = <span style="color: #82aaff;">useCallback</span>((<span style="color: #82aaff;">event</span>: <span style="color: #ffcb6b;">MessageEvent</span>) => {
+    <span style="color: #7c7c7c;">// Security check - validate origin</span>
+    <span style="color: #c792ea;">if</span> (<span style="color: #82aaff;">event</span>.<span style="color: #82aaff;">origin</span> !== <span style="color: #82aaff;">baseUrl</span>) <span style="color: #c792ea;">return</span>;
+    
+    <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">message</span> = <span style="color: #82aaff;">event</span>.<span style="color: #82aaff;">data</span>;
+    <span style="color: #c792ea;">if</span> (!<span style="color: #82aaff;">message</span>.<span style="color: #82aaff;">identityOCR</span>) <span style="color: #c792ea;">return</span>;
+
+    <span style="color: #c792ea;">const</span> { <span style="color: #82aaff;">action</span>, <span style="color: #82aaff;">result</span> } = <span style="color: #82aaff;">message</span>.<span style="color: #82aaff;">identityOCR</span>;
+    
+    <span style="color: #c792ea;">switch</span> (<span style="color: #82aaff;">action</span>) {
+      <span style="color: #c792ea;">case</span> <span style="color: #c3e88d;">'success'</span>:
+        <span style="color: #82aaff;">setIsLoading</span>(<span style="color: #f78c6c;">false</span>);
+        <span style="color: #82aaff;">setError</span>(<span style="color: #f78c6c;">null</span>);
+        <span style="color: #82aaff;">onResult</span>(<span style="color: #82aaff;">result</span>);
+        <span style="color: #c792ea;">break</span>;
+      
+      <span style="color: #c792ea;">case</span> <span style="color: #c3e88d;">'error'</span>:
+        <span style="color: #82aaff;">setIsLoading</span>(<span style="color: #f78c6c;">false</span>);
+        <span style="color: #82aaff;">setError</span>(<span style="color: #82aaff;">result</span>.<span style="color: #82aaff;">error</span> || <span style="color: #c3e88d;">'Verification failed'</span>);
+        <span style="color: #82aaff;">onError</span>?.(<span style="color: #82aaff;">result</span>.<span style="color: #82aaff;">error</span>);
+        <span style="color: #c792ea;">break</span>;
+      
+      <span style="color: #c792ea;">case</span> <span style="color: #c3e88d;">'cancel'</span>:
+      <span style="color: #c792ea;">case</span> <span style="color: #c3e88d;">'close'</span>:
+        <span style="color: #82aaff;">setIsLoading</span>(<span style="color: #f78c6c;">false</span>);
+        <span style="color: #82aaff;">onCancel</span>?.();
+        <span style="color: #c792ea;">break</span>;
+        
+      <span style="color: #c792ea;">case</span> <span style="color: #c3e88d;">'test_auth_complete'</span>:
+        <span style="color: #82aaff;">setIsLoading</span>(<span style="color: #f78c6c;">false</span>);
+        <span style="color: #c792ea;">if</span> (<span style="color: #82aaff;">result</span>.<span style="color: #82aaff;">authorized</span>) {
+          <span style="color: #82aaff;">onResult</span>(<span style="color: #82aaff;">result</span>);
+        } <span style="color: #c792ea;">else</span> {
+          <span style="color: #82aaff;">onCancel</span>?.();
+        }
+        <span style="color: #c792ea;">break</span>;
+    }
+  }, [<span style="color: #82aaff;">baseUrl</span>, <span style="color: #82aaff;">onResult</span>, <span style="color: #82aaff;">onError</span>, <span style="color: #82aaff;">onCancel</span>]);
+
+  <span style="color: #82aaff;">useEffect</span>(() => {
+    <span style="color: #82aaff;">window</span>.<span style="color: #82aaff;">addEventListener</span>(<span style="color: #c3e88d;">'message'</span>, <span style="color: #82aaff;">handleMessage</span>);
+    <span style="color: #c792ea;">return</span> () => <span style="color: #82aaff;">window</span>.<span style="color: #82aaff;">removeEventListener</span>(<span style="color: #c3e88d;">'message'</span>, <span style="color: #82aaff;">handleMessage</span>);
+  }, [<span style="color: #82aaff;">handleMessage</span>]);
+
+  <span style="color: #7c7c7c;">// Configure iframe for dynamic ID type</span>
+  <span style="color: #82aaff;">useEffect</span>(() => {
+    <span style="color: #c792ea;">if</span> (<span style="color: #82aaff;">iframeRef</span>.<span style="color: #82aaff;">current</span>) {
+      <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">configMessage</span> = {
+        <span style="color: #82aaff;">identityOCR</span>: { <span style="color: #82aaff;">action</span>: <span style="color: #c3e88d;">'configure'</span>, <span style="color: #82aaff;">idType</span> }
+      };
+      <span style="color: #82aaff;">iframeRef</span>.<span style="color: #82aaff;">current</span>.<span style="color: #82aaff;">contentWindow</span>?.<span style="color: #82aaff;">postMessage</span>(<span style="color: #82aaff;">configMessage</span>, <span style="color: #82aaff;">baseUrl</span>);
+    }
+  }, [<span style="color: #82aaff;">idType</span>, <span style="color: #82aaff;">baseUrl</span>]);
+
+  <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">embedUrl</span> = <span style="color: #c792ea;">new</span> <span style="color: #ffcb6b;">URL</span>(
+    <span style="color: #82aaff;">sessionId</span> ? <span style="color: #c3e88d;">`/embed/session/${sessionId}`</span> : <span style="color: #c3e88d;">'/embed-demo'</span>, 
+    <span style="color: #82aaff;">baseUrl</span>
+  );
+  <span style="color: #82aaff;">embedUrl</span>.<span style="color: #82aaff;">searchParams</span>.<span style="color: #82aaff;">set</span>(<span style="color: #c3e88d;">'testMode'</span>, <span style="color: #82aaff;">testMode</span>.<span style="color: #82aaff;">toString</span>());
+  <span style="color: #82aaff;">embedUrl</span>.<span style="color: #82aaff;">searchParams</span>.<span style="color: #82aaff;">set</span>(<span style="color: #c3e88d;">'expectedOrigin'</span>, <span style="color: #82aaff;">window</span>.<span style="color: #82aaff;">location</span>.<span style="color: #82aaff;">origin</span>);
+
+  <span style="color: #c792ea;">if</span> (<span style="color: #82aaff;">error</span>) {
+    <span style="color: #c792ea;">return</span> (
+      &lt;<span style="color: #f07178;">div</span> <span style="color: #c792ea;">className</span>=<span style="color: #c3e88d;">"identity-verification-error"</span>&gt;
+        &lt;<span style="color: #f07178;">div</span> <span style="color: #c792ea;">style</span>={{
+          <span style="color: #82aaff;">color</span>: <span style="color: #c3e88d;">'#ef4444'</span>, 
+          <span style="color: #82aaff;">padding</span>: <span style="color: #c3e88d;">'16px'</span>,
+          <span style="color: #82aaff;">border</span>: <span style="color: #c3e88d;">'1px solid #fecaca'</span>,
+          <span style="color: #82aaff;">borderRadius</span>: <span style="color: #c3e88d;">'8px'</span>,
+          <span style="color: #82aaff;">backgroundColor</span>: <span style="color: #c3e88d;">'#fef2f2'</span>
+        }}&gt;
+          <span style="color: #7c7c7c;">❌ Error: {error}</span>
+          &lt;<span style="color: #f07178;">button</span> 
+            <span style="color: #c792ea;">onClick</span>={() => { <span style="color: #82aaff;">setError</span>(<span style="color: #f78c6c;">null</span>); <span style="color: #82aaff;">setIsLoading</span>(<span style="color: #f78c6c;">true</span>); }}
+            <span style="color: #c792ea;">style</span>={{
+              <span style="color: #82aaff;">marginLeft</span>: <span style="color: #c3e88d;">'8px'</span>,
+              <span style="color: #82aaff;">padding</span>: <span style="color: #c3e88d;">'4px 8px'</span>,
+              <span style="color: #82aaff;">backgroundColor</span>: <span style="color: #c3e88d;">'#3b82f6'</span>,
+              <span style="color: #82aaff;">color</span>: <span style="color: #c3e88d;">'white'</span>,
+              <span style="color: #82aaff;">border</span>: <span style="color: #c3e88d;">'none'</span>,
+              <span style="color: #82aaff;">borderRadius</span>: <span style="color: #c3e88d;">'4px'</span>,
+              <span style="color: #82aaff;">cursor</span>: <span style="color: #c3e88d;">'pointer'</span>
+            }}
+          &gt;
+            Retry
+          &lt;/<span style="color: #f07178;">button</span>&gt;
+        &lt;/<span style="color: #f07178;">div</span>&gt;
+      &lt;/<span style="color: #f07178;">div</span>&gt;
+    );
+  }
+
+  <span style="color: #c792ea;">return</span> (
+    &lt;<span style="color: #f07178;">div</span> <span style="color: #c792ea;">className</span>=<span style="color: #c3e88d;">"identity-verification"</span>&gt;
+      {<span style="color: #82aaff;">isLoading</span> && (
+        &lt;<span style="color: #f07178;">div</span> <span style="color: #c792ea;">className</span>=<span style="color: #c3e88d;">"loading-indicator"</span> <span style="color: #c792ea;">style</span>={{
+          <span style="color: #82aaff;">position</span>: <span style="color: #c3e88d;">'absolute'</span>,
+          <span style="color: #82aaff;">top</span>: <span style="color: #c3e88d;">'50%'</span>,
+          <span style="color: #82aaff;">left</span>: <span style="color: #c3e88d;">'50%'</span>,
+          <span style="color: #82aaff;">transform</span>: <span style="color: #c3e88d;">'translate(-50%, -50%)'</span>,
+          <span style="color: #82aaff;">zIndex</span>: <span style="color: #f78c6c;">1000</span>
+        }}&gt;
+          &lt;<span style="color: #f07178;">div</span>&gt;🔄 Loading verification...&lt;/<span style="color: #f07178;">div</span>&gt;
+        &lt;/<span style="color: #f07178;">div</span>&gt;
+      )}
+      &lt;<span style="color: #f07178;">iframe</span>
+        <span style="color: #c792ea;">ref</span>={<span style="color: #82aaff;">iframeRef</span>}
+        <span style="color: #c792ea;">src</span>={<span style="color: #82aaff;">embedUrl</span>.<span style="color: #82aaff;">toString</span>()}
+        <span style="color: #c792ea;">width</span>=<span style="color: #c3e88d;">"100%"</span>
+        <span style="color: #c792ea;">height</span>=<span style="color: #c3e88d;">"600"</span>
+        <span style="color: #c792ea;">frameBorder</span>=<span style="color: #c3e88d;">"0"</span>
+        <span style="color: #c792ea;">title</span>=<span style="color: #c3e88d;">"Identity Verification"</span>
+        <span style="color: #c792ea;">allow</span>=<span style="color: #c3e88d;">"camera; microphone"</span>
+        <span style="color: #c792ea;">onLoad</span>={() => <span style="color: #82aaff;">setIsLoading</span>(<span style="color: #f78c6c;">false</span>)}
+        <span style="color: #c792ea;">style</span>={{ <span style="color: #82aaff;">border</span>: <span style="color: #c3e88d;">'1px solid #e5e7eb'</span>, <span style="color: #82aaff;">borderRadius</span>: <span style="color: #c3e88d;">'8px'</span> }}
+      /&gt;
+    &lt;/<span style="color: #f07178;">div</span>&gt;
+  );
+};
+
+<span style="color: #c792ea;">export default</span> <span style="color: #82aaff;">IdentityVerification</span>;
+                    </div>
+                </div>
+
+                <!-- React Hook Example -->
+                <h4 id="react-custom-hook">Custom React Hook</h4>
+                <p>Reusable hook for identity verification across multiple components:</p>
+                <div class="code-block with-lines">
+                    <div class="line-numbers">
+                        <div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div>10</div>
+                        <div>11</div><div>12</div><div>13</div><div>14</div><div>15</div><div>16</div><div>17</div><div>18</div><div>19</div><div>20</div>
+                        <div>21</div><div>22</div><div>23</div><div>24</div><div>25</div><div>26</div><div>27</div><div>28</div><div>29</div><div>30</div>
+                        <div>31</div><div>32</div><div>33</div><div>34</div><div>35</div><div>36</div><div>37</div><div>38</div><div>39</div><div>40</div>
+                        <div>41</div><div>42</div><div>43</div><div>44</div><div>45</div><div>46</div><div>47</div><div>48</div><div>49</div><div>50</div>
+                        <div>51</div><div>52</div><div>53</div><div>54</div><div>55</div><div>56</div><div>57</div><div>58</div><div>59</div><div>60</div>
+                        <div>61</div><div>62</div><div>63</div><div>64</div><div>65</div><div>66</div><div>67</div><div>68</div><div>69</div><div>70</div>
+                        <div>71</div><div>72</div><div>73</div><div>74</div><div>75</div><div>76</div><div>77</div><div>78</div><div>79</div><div>80</div>
+                        <div>81</div><div>82</div><div>83</div><div>84</div><div>85</div><div>86</div><div>87</div><div>88</div><div>89</div><div>90</div>
+                    </div>
+                    <div class="code-content">
+<span style="color: #7c7c7c;">// useIdentityVerification.ts</span>
+<span style="color: #c792ea;">import</span> { <span style="color: #82aaff;">useState</span>, <span style="color: #82aaff;">useCallback</span>, <span style="color: #82aaff;">useRef</span> } <span style="color: #c792ea;">from</span> <span style="color: #c3e88d;">'react'</span>;
+
+<span style="color: #c792ea;">export</span> <span style="color: #c792ea;">interface</span> <span style="color: #ffcb6b;">VerificationConfig</span> {
+  <span style="color: #82aaff;">baseUrl</span>?: <span style="color: #c792ea;">string</span>;
+  <span style="color: #82aaff;">testMode</span>?: <span style="color: #c792ea;">boolean</span>;
+  <span style="color: #82aaff;">idType</span>?: <span style="color: #c3e88d;">'national-id'</span> | <span style="color: #c3e88d;">'passport'</span> | <span style="color: #c3e88d;">'umid'</span>;
+}
+
+<span style="color: #c792ea;">export</span> <span style="color: #c792ea;">interface</span> <span style="color: #ffcb6b;">VerificationState</span> {
+  <span style="color: #82aaff;">isLoading</span>: <span style="color: #c792ea;">boolean</span>;
+  <span style="color: #82aaff;">error</span>: <span style="color: #c792ea;">string</span> | <span style="color: #c792ea;">null</span>;
+  <span style="color: #82aaff;">result</span>: <span style="color: #ffcb6b;">IdentityData</span> | <span style="color: #c792ea;">null</span>;
+  <span style="color: #82aaff;">sessionId</span>: <span style="color: #c792ea;">string</span> | <span style="color: #c792ea;">null</span>;
+}
+
+<span style="color: #c792ea;">export</span> <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">useIdentityVerification</span> = (<span style="color: #82aaff;">config</span>: <span style="color: #ffcb6b;">VerificationConfig</span> = {}) => {
+  <span style="color: #c792ea;">const</span> {
+    <span style="color: #82aaff;">baseUrl</span> = <span style="color: #c3e88d;">'http://localhost:3000'</span>,
+    <span style="color: #82aaff;">testMode</span> = <span style="color: #f78c6c;">false</span>,
+    <span style="color: #82aaff;">idType</span> = <span style="color: #c3e88d;">'national-id'</span>
+  } = <span style="color: #82aaff;">config</span>;
+
+  <span style="color: #c792ea;">const</span> [<span style="color: #82aaff;">state</span>, <span style="color: #82aaff;">setState</span>] = <span style="color: #82aaff;">useState</span>&lt;<span style="color: #ffcb6b;">VerificationState</span>&gt;({
+    <span style="color: #82aaff;">isLoading</span>: <span style="color: #f78c6c;">false</span>,
+    <span style="color: #82aaff;">error</span>: <span style="color: #f78c6c;">null</span>,
+    <span style="color: #82aaff;">result</span>: <span style="color: #f78c6c;">null</span>,
+    <span style="color: #82aaff;">sessionId</span>: <span style="color: #f78c6c;">null</span>
+  });
+
+  <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">abortControllerRef</span> = <span style="color: #82aaff;">useRef</span>&lt;<span style="color: #ffcb6b;">AbortController</span> | <span style="color: #c792ea;">null</span>&gt;(<span style="color: #f78c6c;">null</span>);
+
+  <span style="color: #7c7c7c;">// Create verification session</span>
+  <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">createSession</span> = <span style="color: #82aaff;">useCallback</span>(<span style="color: #c792ea;">async</span> (<span style="color: #82aaff;">payload</span> = {}) => {
+    <span style="color: #82aaff;">setState</span>(<span style="color: #82aaff;">prev</span> => ({ ...<span style="color: #82aaff;">prev</span>, <span style="color: #82aaff;">isLoading</span>: <span style="color: #f78c6c;">true</span>, <span style="color: #82aaff;">error</span>: <span style="color: #f78c6c;">null</span> }));
+    
+    <span style="color: #c792ea;">try</span> {
+      <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">response</span> = <span style="color: #c792ea;">await</span> <span style="color: #82aaff;">fetch</span>(<span style="color: #c3e88d;">`${baseUrl}/api/verify/create`</span>, {
+        <span style="color: #82aaff;">method</span>: <span style="color: #c3e88d;">'POST'</span>,
+        <span style="color: #82aaff;">headers</span>: { <span style="color: #c3e88d;">'Content-Type'</span>: <span style="color: #c3e88d;">'application/json'</span> },
+        <span style="color: #82aaff;">body</span>: <span style="color: #ffcb6b;">JSON</span>.<span style="color: #82aaff;">stringify</span>({
+          <span style="color: #82aaff;">testMode</span>,
+          <span style="color: #82aaff;">idType</span>,
+          <span style="color: #82aaff;">origin</span>: <span style="color: #82aaff;">window</span>.<span style="color: #82aaff;">location</span>.<span style="color: #82aaff;">origin</span>,
+          ...<span style="color: #82aaff;">payload</span>
+        })
+      });
+      
+      <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">data</span> = <span style="color: #c792ea;">await</span> <span style="color: #82aaff;">response</span>.<span style="color: #82aaff;">json</span>();
+      
+      <span style="color: #c792ea;">if</span> (<span style="color: #82aaff;">data</span>.<span style="color: #82aaff;">success</span>) {
+        <span style="color: #82aaff;">setState</span>(<span style="color: #82aaff;">prev</span> => ({ 
+          ...<span style="color: #82aaff;">prev</span>, 
+          <span style="color: #82aaff;">sessionId</span>: <span style="color: #82aaff;">data</span>.<span style="color: #82aaff;">sessionId</span>, 
+          <span style="color: #82aaff;">isLoading</span>: <span style="color: #f78c6c;">false</span> 
+        }));
+        <span style="color: #c792ea;">return</span> <span style="color: #82aaff;">data</span>;
+      } <span style="color: #c792ea;">else</span> {
+        <span style="color: #c792ea;">throw</span> <span style="color: #c792ea;">new</span> <span style="color: #ffcb6b;">Error</span>(<span style="color: #82aaff;">data</span>.<span style="color: #82aaff;">error</span> || <span style="color: #c3e88d;">'Failed to create session'</span>);
+      }
+    } <span style="color: #c792ea;">catch</span> (<span style="color: #82aaff;">error</span>) {
+      <span style="color: #82aaff;">setState</span>(<span style="color: #82aaff;">prev</span> => ({ 
+        ...<span style="color: #82aaff;">prev</span>, 
+        <span style="color: #82aaff;">error</span>: <span style="color: #82aaff;">error</span> <span style="color: #c792ea;">instanceof</span> <span style="color: #ffcb6b;">Error</span> ? <span style="color: #82aaff;">error</span>.<span style="color: #82aaff;">message</span> : <span style="color: #c3e88d;">'Unknown error'</span>,
+        <span style="color: #82aaff;">isLoading</span>: <span style="color: #f78c6c;">false</span> 
+      }));
+      <span style="color: #c792ea;">throw</span> <span style="color: #82aaff;">error</span>;
+    }
+  }, [<span style="color: #82aaff;">baseUrl</span>, <span style="color: #82aaff;">testMode</span>, <span style="color: #82aaff;">idType</span>]);
+
+  <span style="color: #7c7c7c;">// Get session status</span>
+  <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">getSessionStatus</span> = <span style="color: #82aaff;">useCallback</span>(<span style="color: #c792ea;">async</span> (<span style="color: #82aaff;">sessionId</span>: <span style="color: #c792ea;">string</span>) => {
+    <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">response</span> = <span style="color: #c792ea;">await</span> <span style="color: #82aaff;">fetch</span>(<span style="color: #c3e88d;">`${baseUrl}/api/verify/session/${sessionId}`</span>);
+    <span style="color: #c792ea;">return</span> <span style="color: #c792ea;">await</span> <span style="color: #82aaff;">response</span>.<span style="color: #82aaff;">json</span>();
+  }, [<span style="color: #82aaff;">baseUrl</span>]);
+
+  <span style="color: #7c7c7c;">// Reset state</span>
+  <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">reset</span> = <span style="color: #82aaff;">useCallback</span>(() => {
+    <span style="color: #82aaff;">abortControllerRef</span>.<span style="color: #82aaff;">current</span>?.<span style="color: #82aaff;">abort</span>();
+    <span style="color: #82aaff;">setState</span>({
+      <span style="color: #82aaff;">isLoading</span>: <span style="color: #f78c6c;">false</span>,
+      <span style="color: #82aaff;">error</span>: <span style="color: #f78c6c;">null</span>,
+      <span style="color: #82aaff;">result</span>: <span style="color: #f78c6c;">null</span>,
+      <span style="color: #82aaff;">sessionId</span>: <span style="color: #f78c6c;">null</span>
+    });
+  }, []);
+
+  <span style="color: #7c7c7c;">// Handle verification result</span>
+  <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">handleResult</span> = <span style="color: #82aaff;">useCallback</span>((<span style="color: #82aaff;">result</span>: <span style="color: #ffcb6b;">IdentityData</span>) => {
+    <span style="color: #82aaff;">setState</span>(<span style="color: #82aaff;">prev</span> => ({ ...<span style="color: #82aaff;">prev</span>, <span style="color: #82aaff;">result</span>, <span style="color: #82aaff;">isLoading</span>: <span style="color: #f78c6c;">false</span>, <span style="color: #82aaff;">error</span>: <span style="color: #f78c6c;">null</span> }));
+  }, []);
+
+  <span style="color: #7c7c7c;">// Handle verification error</span>
+  <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">handleError</span> = <span style="color: #82aaff;">useCallback</span>((<span style="color: #82aaff;">error</span>: <span style="color: #c792ea;">string</span>) => {
+    <span style="color: #82aaff;">setState</span>(<span style="color: #82aaff;">prev</span> => ({ ...<span style="color: #82aaff;">prev</span>, <span style="color: #82aaff;">error</span>, <span style="color: #82aaff;">isLoading</span>: <span style="color: #f78c6c;">false</span> }));
+  }, []);
+
+  <span style="color: #c792ea;">return</span> {
+    ...state,
+    <span style="color: #82aaff;">createSession</span>,
+    <span style="color: #82aaff;">getSessionStatus</span>,
+    <span style="color: #82aaff;">reset</span>,
+    <span style="color: #82aaff;">handleResult</span>,
+    <span style="color: #82aaff;">handleError</span>
+  };
+};
+                    </div>
+                </div>
+
+                <!-- React Usage Example -->
+                <h4 id="react-usage-example">Complete Usage Example</h4>
+                <p>Example React app using the identity verification component and hook:</p>
+                <div class="code-block with-lines">
+                    <div class="line-numbers">
+                        <div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div>10</div>
+                        <div>11</div><div>12</div><div>13</div><div>14</div><div>15</div><div>16</div><div>17</div><div>18</div><div>19</div><div>20</div>
+                        <div>21</div><div>22</div><div>23</div><div>24</div><div>25</div><div>26</div><div>27</div><div>28</div><div>29</div><div>30</div>
+                        <div>31</div><div>32</div><div>33</div><div>34</div><div>35</div><div>36</div><div>37</div><div>38</div><div>39</div><div>40</div>
+                        <div>41</div><div>42</div><div>43</div><div>44</div><div>45</div><div>46</div><div>47</div><div>48</div><div>49</div><div>50</div>
+                        <div>51</div><div>52</div><div>53</div><div>54</div><div>55</div><div>56</div><div>57</div><div>58</div><div>59</div><div>60</div>
+                        <div>61</div><div>62</div><div>63</div><div>64</div><div>65</div><div>66</div><div>67</div><div>68</div><div>69</div><div>70</div>
+                        <div>71</div><div>72</div><div>73</div><div>74</div><div>75</div><div>76</div><div>77</div><div>78</div><div>79</div><div>80</div>
+                        <div>81</div><div>82</div><div>83</div><div>84</div><div>85</div><div>86</div><div>87</div><div>88</div><div>89</div><div>90</div>
+                    </div>
+                    <div class="code-content">
+<span style="color: #7c7c7c;">// App.tsx</span>
+<span style="color: #c792ea;">import</span> <span style="color: #82aaff;">React</span>, { <span style="color: #82aaff;">useState</span> } <span style="color: #c792ea;">from</span> <span style="color: #c3e88d;">'react'</span>;
+<span style="color: #c792ea;">import</span> <span style="color: #82aaff;">IdentityVerification</span> <span style="color: #c792ea;">from</span> <span style="color: #c3e88d;">'./components/IdentityVerification'</span>;
+<span style="color: #c792ea;">import</span> { <span style="color: #82aaff;">useIdentityVerification</span>, <span style="color: #ffcb6b;">IdentityData</span> } <span style="color: #c792ea;">from</span> <span style="color: #c3e88d;">'./hooks/useIdentityVerification'</span>;
+
+<span style="color: #c792ea;">const</span> <span style="color: #82aaff;">App</span>: <span style="color: #ffcb6b;">React.FC</span> = () => {
+  <span style="color: #c792ea;">const</span> [<span style="color: #82aaff;">activeTab</span>, <span style="color: #82aaff;">setActiveTab</span>] = <span style="color: #82aaff;">useState</span>(<span style="color: #c3e88d;">'component'</span>);
+  <span style="color: #c792ea;">const</span> [<span style="color: #82aaff;">verificationData</span>, <span style="color: #82aaff;">setVerificationData</span>] = <span style="color: #82aaff;">useState</span>&lt;<span style="color: #ffcb6b;">IdentityData</span> | <span style="color: #c792ea;">null</span>&gt;(<span style="color: #f78c6c;">null</span>);
+  
+  <span style="color: #7c7c7c;">// Using the custom hook</span>
+  <span style="color: #c792ea;">const</span> {
+    <span style="color: #82aaff;">isLoading</span>,
+    <span style="color: #82aaff;">error</span>,
+    <span style="color: #82aaff;">result</span>,
+    <span style="color: #82aaff;">sessionId</span>,
+    <span style="color: #82aaff;">createSession</span>,
+    <span style="color: #82aaff;">reset</span>,
+    <span style="color: #82aaff;">handleResult</span>,
+    <span style="color: #82aaff;">handleError</span>
+  } = <span style="color: #82aaff;">useIdentityVerification</span>({
+    <span style="color: #82aaff;">testMode</span>: <span style="color: #f78c6c;">true</span>,
+    <span style="color: #82aaff;">idType</span>: <span style="color: #c3e88d;">'national-id'</span>
+  });
+
+  <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">handleVerificationResult</span> = (<span style="color: #82aaff;">data</span>: <span style="color: #ffcb6b;">IdentityData</span>) => {
+    <span style="color: #82aaff;">console</span>.<span style="color: #82aaff;">log</span>(<span style="color: #c3e88d;">'✅ Verification successful:'</span>, <span style="color: #82aaff;">data</span>);
+    <span style="color: #82aaff;">setVerificationData</span>(<span style="color: #82aaff;">data</span>);
+    <span style="color: #82aaff;">handleResult</span>(<span style="color: #82aaff;">data</span>);
+    
+    <span style="color: #7c7c7c;">// Process the verified identity data</span>
+    <span style="color: #c792ea;">if</span> (<span style="color: #82aaff;">data</span>.<span style="color: #82aaff;">action</span> === <span style="color: #c3e88d;">'success'</span>) {
+      <span style="color: #7c7c7c;">// Send to your backend, save to database, etc.</span>
+      <span style="color: #82aaff;">submitToBackend</span>(<span style="color: #82aaff;">data</span>);
+    }
+  };
+
+  <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">handleVerificationError</span> = (<span style="color: #82aaff;">error</span>: <span style="color: #c792ea;">string</span>) => {
+    <span style="color: #82aaff;">console</span>.<span style="color: #82aaff;">error</span>(<span style="color: #c3e88d;">'❌ Verification error:'</span>, <span style="color: #82aaff;">error</span>);
+    <span style="color: #82aaff;">handleError</span>(<span style="color: #82aaff;">error</span>);
+    <span style="color: #7c7c7c;">// Handle error - show notification, log to analytics, etc.</span>
+  };
+
+  <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">handleCancel</span> = () => {
+    <span style="color: #82aaff;">console</span>.<span style="color: #82aaff;">log</span>(<span style="color: #c3e88d;">'🚫 Verification cancelled'</span>);
+    <span style="color: #7c7c7c;">// Handle cancellation - redirect, show message, etc.</span>
+  };
+
+  <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">submitToBackend</span> = <span style="color: #c792ea;">async</span> (<span style="color: #82aaff;">data</span>: <span style="color: #ffcb6b;">IdentityData</span>) => {
+    <span style="color: #c792ea;">try</span> {
+      <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">response</span> = <span style="color: #c792ea;">await</span> <span style="color: #82aaff;">fetch</span>(<span style="color: #c3e88d;">'/api/users/verify-identity'</span>, {
+        <span style="color: #82aaff;">method</span>: <span style="color: #c3e88d;">'POST'</span>,
+        <span style="color: #82aaff;">headers</span>: { <span style="color: #c3e88d;">'Content-Type'</span>: <span style="color: #c3e88d;">'application/json'</span> },
+        <span style="color: #82aaff;">body</span>: <span style="color: #ffcb6b;">JSON</span>.<span style="color: #82aaff;">stringify</span>(<span style="color: #82aaff;">data</span>)
+      });
+      
+      <span style="color: #c792ea;">if</span> (<span style="color: #82aaff;">response</span>.<span style="color: #82aaff;">ok</span>) {
+        <span style="color: #82aaff;">console</span>.<span style="color: #82aaff;">log</span>(<span style="color: #c3e88d;">'Identity data saved successfully'</span>);
+      }
+    } <span style="color: #c792ea;">catch</span> (<span style="color: #82aaff;">error</span>) {
+      <span style="color: #82aaff;">console</span>.<span style="color: #82aaff;">error</span>(<span style="color: #c3e88d;">'Failed to save identity data:'</span>, <span style="color: #82aaff;">error</span>);
+    }
+  };
+
+  <span style="color: #c792ea;">return</span> (
+    &lt;<span style="color: #f07178;">div</span> <span style="color: #c792ea;">className</span>=<span style="color: #c3e88d;">"app"</span>&gt;
+      &lt;<span style="color: #f07178;">h1</span>&gt;Identity Verification Demo&lt;/<span style="color: #f07178;">h1</span>&gt;
+      
+      <span style="color: #7c7c7c;">{/* Tab Navigation */}</span>
+      &lt;<span style="color: #f07178;">div</span> <span style="color: #c792ea;">className</span>=<span style="color: #c3e88d;">"tabs"</span>&gt;
+        &lt;<span style="color: #f07178;">button</span> 
+          <span style="color: #c792ea;">onClick</span>={() => <span style="color: #82aaff;">setActiveTab</span>(<span style="color: #c3e88d;">'component'</span>)}
+          <span style="color: #c792ea;">className</span>={<span style="color: #82aaff;">activeTab</span> === <span style="color: #c3e88d;">'component'</span> ? <span style="color: #c3e88d;">'active'</span> : <span style="color: #c3e88d;">''</span>}
+        &gt;
+          Component Demo
+        &lt;/<span style="color: #f07178;">button</span>&gt;
+        &lt;<span style="color: #f07178;">button</span> 
+          <span style="color: #c792ea;">onClick</span>={() => <span style="color: #82aaff;">setActiveTab</span>(<span style="color: #c3e88d;">'hook'</span>)}
+          <span style="color: #c792ea;">className</span>={<span style="color: #82aaff;">activeTab</span> === <span style="color: #c3e88d;">'hook'</span> ? <span style="color: #c3e88d;">'active'</span> : <span style="color: #c3e88d;">''</span>}
+        &gt;
+          Hook Demo
+        &lt;/<span style="color: #f07178;">button</span>&gt;
+      &lt;/<span style="color: #f07178;">div</span>&gt;
+
+      {<span style="color: #82aaff;">activeTab</span> === <span style="color: #c3e88d;">'component'</span> && (
+        &lt;<span style="color: #f07178;">div</span>&gt;
+          &lt;<span style="color: #f07178;">h2</span>&gt;React Component Integration&lt;/<span style="color: #f07178;">h2</span>&gt;
+          &lt;<span style="color: #f07178;">IdentityVerification</span>
+            <span style="color: #c792ea;">testMode</span>={<span style="color: #f78c6c;">true</span>}
+            <span style="color: #c792ea;">idType</span>=<span style="color: #c3e88d;">"national-id"</span>
+            <span style="color: #c792ea;">onResult</span>={<span style="color: #82aaff;">handleVerificationResult</span>}
+            <span style="color: #c792ea;">onError</span>={<span style="color: #82aaff;">handleVerificationError</span>}
+            <span style="color: #c792ea;">onCancel</span>={<span style="color: #82aaff;">handleCancel</span>}
+          /&gt;
+          
+          {<span style="color: #82aaff;">verificationData</span> && (
+            &lt;<span style="color: #f07178;">div</span> <span style="color: #c792ea;">className</span>=<span style="color: #c3e88d;">"result"</span>&gt;
+              &lt;<span style="color: #f07178;">h3</span>&gt;Verification Result:&lt;/<span style="color: #f07178;">h3</span>&gt;
+              &lt;<span style="color: #f07178;">pre</span>&gt;{<span style="color: #ffcb6b;">JSON</span>.<span style="color: #82aaff;">stringify</span>(<span style="color: #82aaff;">verificationData</span>, <span style="color: #f78c6c;">null</span>, <span style="color: #f78c6c;">2</span>)}&lt;/<span style="color: #f07178;">pre</span>&gt;
+            &lt;/<span style="color: #f07178;">div</span>&gt;
+          )}
+        &lt;/<span style="color: #f07178;">div</span>&gt;
+      )}
+
+      {<span style="color: #82aaff;">activeTab</span> === <span style="color: #c3e88d;">'hook'</span> && (
+        &lt;<span style="color: #f07178;">div</span>&gt;
+          &lt;<span style="color: #f07178;">h2</span>&gt;Custom Hook Integration&lt;/<span style="color: #f07178;">h2</span>&gt;
+          &lt;<span style="color: #f07178;">button</span> <span style="color: #c792ea;">onClick</span>={<span style="color: #82aaff;">createSession</span>} <span style="color: #c792ea;">disabled</span>={<span style="color: #82aaff;">isLoading</span>}&gt;
+            Create Verification Session
+          &lt;/<span style="color: #f07178;">button</span>&gt;
+          &lt;<span style="color: #f07178;">button</span> <span style="color: #c792ea;">onClick</span>={<span style="color: #82aaff;">reset</span>}&gt;Reset&lt;/<span style="color: #f07178;">button</span>&gt;
+          
+          {<span style="color: #82aaff;">isLoading</span> && &lt;<span style="color: #f07178;">p</span>&gt;Loading...&lt;/<span style="color: #f07178;">p</span>&gt;}
+          {<span style="color: #82aaff;">error</span> && &lt;<span style="color: #f07178;">p</span> <span style="color: #c792ea;">style</span>={{<span style="color: #82aaff;">color</span>: <span style="color: #c3e88d;">'red'</span>}}&gt;Error: {<span style="color: #82aaff;">error</span>}&lt;/<span style="color: #f07178;">p</span>&gt;}
+          {<span style="color: #82aaff;">result</span> && &lt;<span style="color: #f07178;">pre</span>&gt;{<span style="color: #ffcb6b;">JSON</span>.<span style="color: #82aaff;">stringify</span>(<span style="color: #82aaff;">result</span>, <span style="color: #f78c6c;">null</span>, <span style="color: #f78c6c;">2</span>)}&lt;/<span style="color: #f07178;">pre</span>&gt;}
+          {<span style="color: #82aaff;">sessionId</span> && &lt;<span style="color: #f07178;">p</span>&gt;Session ID: {<span style="color: #82aaff;">sessionId</span>}&lt;/<span style="color: #f07178;">p</span>&gt;}
+        &lt;/<span style="color: #f07178;">div</span>&gt;
+      )}
+    &lt;/<span style="color: #f07178;">div</span>&gt;
+  );
+};
+
+<span style="color: #c792ea;">export default</span> <span style="color: #82aaff;">App</span>;
+                        <div>11</div><div>12</div><div>13</div><div>14</div><div>15</div><div>16</div><div>17</div><div>18</div><div>19</div><div>20</div>
+                        <div>21</div><div>22</div><div>23</div><div>24</div><div>25</div><div>26</div><div>27</div><div>28</div><div>29</div><div>30</div>
+                        <div>31</div><div>32</div><div>33</div><div>34</div><div>35</div><div>36</div><div>37</div><div>38</div><div>39</div><div>40</div>
+                        <div>41</div><div>42</div><div>43</div><div>44</div><div>45</div><div>46</div><div>47</div><div>48</div><div>49</div><div>50</div>
+                        <div>51</div><div>52</div><div>53</div><div>54</div><div>55</div><div>56</div><div>57</div><div>58</div><div>59</div><div>60</div>
+                        <div>61</div><div>62</div><div>63</div><div>64</div><div>65</div><div>66</div><div>67</div><div>68</div><div>69</div><div>70</div>
+                        <div>71</div><div>72</div><div>73</div><div>74</div><div>75</div><div>76</div><div>77</div><div>78</div><div>79</div><div>80</div>
                     </div>
                     <div class="code-content">
 <span style="color: #c792ea;">import</span> <span style="color: #82aaff;">React</span>, { 
@@ -753,6 +1211,9 @@ window.addEventListener('message', function(event) {
   <span style="color: #82aaff;">idNumber</span>: <span style="color: #c792ea;">string</span>;
   <span style="color: #82aaff;">birthDate</span>: <span style="color: #c792ea;">string</span>;
   <span style="color: #82aaff;">confidence</span>: <span style="color: #c792ea;">number</span>;
+  <span style="color: #82aaff;">phone_number</span>?: <span style="color: #c792ea;">string</span>;
+  <span style="color: #82aaff;">id_type</span>: <span style="color: #c3e88d;">'national-id'</span> | <span style="color: #c3e88d;">'passport'</span> | <span style="color: #c3e88d;">'umid'</span>;
+  <span style="color: #82aaff;">action</span>: <span style="color: #c3e88d;">'success'</span> | <span style="color: #c3e88d;">'cancel'</span>;
 }
 
 <span style="color: #c792ea;">interface</span> <span style="color: #ffcb6b;">IdentityVerificationProps</span> {
@@ -933,7 +1394,10 @@ window.addEventListener('message', function(event) {
   <span style="color: #82aaff;">lastName</span>: <span style="color: #c792ea;">string</span>;
   <span style="color: #82aaff;">idNumber</span>: <span style="color: #c792ea;">string</span>;
   <span style="color: #82aaff;">birthDate</span>: <span style="color: #c792ea;">string</span>;
-  <span style="color: #82aaff;">confidence</span>: <span style="color: #c792ea;">number</span>;
+  <span style="color: #82aaff;">confidence</span>: <span style="color: #c792ea;">string</span>;
+  <span style="color: #82aaff;">phone_number</span>?: <span style="color: #c792ea;">string</span>;
+  <span style="color: #82aaff;">id_type</span>: <span style="color: #c3e88d;">'national-id'</span> | <span style="color: #c3e88d;">'passport'</span> | <span style="color: #c3e88d;">'umid'</span>;
+  <span style="color: #82aaff;">action</span>: <span style="color: #c3e88d;">'success'</span> | <span style="color: #c3e88d;">'cancel'</span>;
 }
 
 <span style="color: #7c7c7c;">// Props with defaults</span>
@@ -1808,7 +2272,13 @@ window.addEventListener('message', function(event) {
                 <li><a href="#" onclick="scrollToSection('postmessage-api')" class="subsection">PostMessage API</a></li>
                 
                 <li><a href="#" onclick="scrollToSection('examples')" class="section">💻 Code Examples</a></li>
-                <li><a href="#" onclick="scrollToSection('react-example')" class="subsection">React Integration</a></li>
+                <li><a href="#" onclick="scrollToSection('react-example')" class="subsection">React Integration</a>
+                    <ul class="subsections">
+                        <li><a href="#" onclick="scrollToSection('react-basic-component')" class="sub-subsection">Basic Component</a></li>
+                        <li><a href="#" onclick="scrollToSection('react-custom-hook')" class="sub-subsection">Custom Hook</a></li>
+                        <li><a href="#" onclick="scrollToSection('react-usage-example')" class="sub-subsection">Usage Example</a></li>
+                    </ul>
+                </li>
                 <li><a href="#" onclick="scrollToSection('vue-example')" class="subsection">Vue.js 3 Integration</a></li>
                 <li><a href="#" onclick="scrollToSection('vanilla-example')" class="subsection">Vanilla JavaScript</a></li>
                 <li><a href="#" onclick="scrollToSection('nodejs-example')" class="subsection">Node.js Backend</a></li>
@@ -1865,7 +2335,8 @@ window.addEventListener('message', function(event) {
             const sections = [
                 'demo', 'api', 'api-endpoints', 'api-parameters', 'api-responses',
                 'integration', 'quick-start', 'iframe-embedding', 'postmessage-api',
-                'examples', 'react-example', 'vue-example', 'vanilla-example', 'nodejs-example'
+                'examples', 'react-example', 'react-basic-component', 'react-custom-hook', 'react-usage-example', 
+                'vue-example', 'vanilla-example', 'nodejs-example'
             ];
             
             let currentSection = null;
