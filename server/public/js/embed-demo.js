@@ -16,6 +16,7 @@
 
   window.addEventListener('message', (evt) => {
     try{
+
       const d = evt.data;
       const origin = evt.origin;
       if (d && d.identityOCR) {
@@ -73,19 +74,19 @@
   createBtn.addEventListener('click', async () => {
     createBtn.disabled = true;
     createBtn.textContent = 'Creating…';
-    try{
-  const frontendBase = frontendBaseEl.value?.trim() || undefined;
-  const idType = (document.getElementById('demoIdType')?.value) || undefined;
-  const testModeValue = (document.getElementById('testModeSelect')?.value) || 'camera';
-  
-  // Determine testMode based on selection
-  const testMode = testModeValue === 'test';
-  
-  const payload = { 
-    ...(frontendBase ? { frontendBase } : {}), 
-    ...(idType ? { idType } : {}),
-    testMode: testMode
-  };
+    try {
+      const frontendBase = frontendBaseEl.value?.trim() || undefined;
+      const idType = (document.getElementById('demoIdType')?.value) || undefined;
+      const testModeValue = (document.getElementById('testModeSelect')?.value) || 'camera';
+      
+      // Determine testMode based on selection
+      const testMode = testModeValue === 'test';
+      
+      const payload = { 
+        ...(frontendBase ? { frontendBase } : {}), 
+        ...(idType ? { idType } : {}),
+        testMode: testMode
+      };
       // Log API request for live monitoring
       if (typeof logApiRequest === 'function') {
         logApiRequest('POST', '/api/verify/create', payload);
@@ -108,9 +109,9 @@
 
       // embed the identity iframe (hosted by identity server) using iframeUrl when available
       // Pass expectedOrigin so the embed page knows where to postMessage back to
-  const embedExpectedOrigin = frontendBaseEl.value?.trim() || window.location.origin;
-  const expectedOrigin = embedExpectedOrigin;
-  const baseSrc = json.iframeUrl || json.wrapperUrl || json.directAdminUrl;
+      const embedExpectedOrigin = frontendBaseEl.value?.trim() || window.location.origin;
+      const expectedOrigin = embedExpectedOrigin;
+      const baseSrc = json.iframeUrl || json.wrapperUrl || json.directAdminUrl;
       const src = baseSrc + (baseSrc.includes('?') ? '&' : '?') + `expectedOrigin=${encodeURIComponent(expectedOrigin)}`;
       iframeEl = document.createElement('iframe');
       iframeEl.src = src;
@@ -166,8 +167,12 @@
         } catch (e) { /* ignore */ }
       }, 2000);
 
-    }catch(e){ sessionInfo.innerText = 'Error: ' + String(e); }
-    finally { createBtn.disabled = false; createBtn.textContent='Create & Embed'; }
+    } catch(e) { 
+      sessionInfo.innerText = 'Error: ' + String(e); 
+    } finally { 
+      createBtn.disabled = false; 
+      createBtn.textContent = 'Create & Embed'; 
+    }
   });
 
   openWrapper.addEventListener('click', () => {
@@ -207,7 +212,11 @@
       
       if (!j?.success) alert('Push failed: ' + JSON.stringify(j));
       sessionInfo.innerHTML = `<pre>${JSON.stringify(j, null, 2)}</pre>`;
-    } catch (e) { alert('Error: ' + String(e)); }
-    finally { pushResultBtn.disabled = false; pushResultBtn.textContent = 'Push Result'; }
+    } catch (e) { 
+      alert('Error: ' + String(e)); 
+    } finally { 
+      pushResultBtn.disabled = false; 
+      pushResultBtn.textContent = 'Push Result'; 
+    }
   });
 })();

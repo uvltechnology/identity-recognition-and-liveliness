@@ -358,6 +358,7 @@ app.get('/embed/session/:id', async (req, res) => {
               
               // Create result payload with mock identity data if authorized
               const result = {
+                action: authorized ? 'success' : 'cancel',
                 testMode: true,
                 authorized: authorized,
                 timestamp: new Date().toISOString(),
@@ -371,7 +372,8 @@ app.get('/embed/session/:id', async (req, res) => {
                   lastName: 'Doe',
                   idNumber: 'ID123456789',
                   birthDate: '1990-01-15',
-                  confidence: 'high'
+                  confidence: 'high',
+                  phone_number: '0912 345 6789'
                 };
                 result.rawText = 'REPUBLIC OF THE PHILIPPINES\\nDRIVER\\'S LICENSE\\nLAST NAME: DOE\\nFIRST NAME: JOHN\\nID NO: ID123456789\\nBIRTH DATE: 01/15/1990\\nTEST MODE SAMPLE DATA';
               }
