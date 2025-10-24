@@ -297,7 +297,7 @@ app.get('/embed/session/:id', async (req, res) => {
     const isTestMode = session && session.payload && session.payload.testMode === true;
 
     if (isTestMode) {
-      // Show only authorization buttons for test mode
+      // Show consent overlay first, then authorization buttons for test mode
       const testModeHtml = `<!doctype html>
       <html lang="en">
         <head>
@@ -318,12 +318,34 @@ app.get('/embed/session/:id', async (req, res) => {
             .btn-skip:hover { background: #4b5563; transform: translateY(-1px); }
             .test-indicator { position: fixed; top: 1rem; right: 1rem; background: #f59e0b; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 0.8rem; font-weight: bold; }
             .auth-info { background: #f3f4f6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1.5rem; font-size: 0.9rem; color: #374151; }
+            .consent-overlay { position: fixed; inset: 0; z-index: 99999; display: flex; align-items: center; justify-content: center; background: rgba(2,6,23,0.6); }
+            .consent-content { max-width: 720px; width: 92%; background: white; border-radius: 8px; padding: 20px; box-shadow: 0 10px 40px rgba(2,6,23,0.5); }
           </style>
         </head>
         <body>
           <div class="test-indicator">🧪 TEST MODE</div>
+          
+          <!-- Privacy consent overlay - shown first -->
+          <div id="consentOverlay" class="consent-overlay">
+            <div class="consent-content">
+              <h2 style="margin:0 0 8px 0; font-size:1.25rem;">Privacy & Data Consent</h2>
+              <p style="margin-bottom: 12px; font-size: 0.9rem; color: #374151;">This verification will capture and process identity data (name, DOB, ID number) in test mode. By continuing you consent to the data processing for verification purposes. Do not proceed if you do not consent.</p>
+              <p style="margin-bottom: 16px; font-size: 0.9rem; color: #374151;"><strong>Test Mode Information:</strong></p>
+              <ul style="list-style-type: disc; padding-left: 20px; margin-bottom: 16px; font-size: 0.9rem; color: #374151;">
+                <li>This is a test environment using mock data</li>
+                <li>No real camera or image capture will occur</li>
+                <li>Sample identity data will be provided for testing</li>
+                <li>Your privacy is maintained during testing</li>
+              </ul>
+              <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
+                <button onclick="declineConsent()" style="padding:8px 12px; border-radius:6px; background:#e5e7eb; border:0; cursor:pointer;">Decline</button>
+                <button onclick="acceptConsent()" style="padding:8px 12px; border-radius:6px; background:#0ea5e9; color:white; border:0; cursor:pointer;">I Consent & Continue</button>
+              </div>
+            </div>
+          </div>
+
           <div class="container">
-            <div class="card">
+            <div id="authCard" class="card" style="display: none;">
               <div class="title">Authorization Test</div>
               <div class="subtitle">Test Mode - Choose Authorization Flow</div>
               
@@ -352,6 +374,78 @@ app.get('/embed/session/:id', async (req, res) => {
             window.__IDENTITY_SESSION__ = ${JSON.stringify(id)};
             window.__IDENTITY_EXPECTED_ORIGIN__ = ${JSON.stringify(expectedOrigin)};
             window.__IDENTITY_TEST_MODE__ = true;
+
+            // Consent flow functions
+            function acceptConsent() {
+              // Hide consent overlay and show authorization card
+              document.getElementById('consentOverlay').style.display = 'none';
+              document.getElementById('authCard').style.display = 'block';
+            }
+
+            function declineConsent() {
+              // Show decline message first - NO response sent yet
+              const consentOverlay = document.getElementById('consentOverlay');
+              consentOverlay.innerHTML = \`
+                <div class="consent-content">
+                  <h3 style="margin:0 0 8px 0; font-size:1.1rem; color: #ef4444;">Consent Declined</h3>
+                  <p style="color:#374151; margin-top:6px; font-size: 0.9rem;">You declined the data processing consent. The verification will be cancelled.</p>
+                  <div style="margin-top: 16px; text-align: center;">
+                    <div style="display: inline-block; width: 20px; height: 20px; border: 2px solid #ef4444; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                    <p style="margin-top: 8px; font-size: 0.8rem; color: #6b7280;">Preparing to close...</p>
+                  </div>
+                </div>
+              \`;
+
+              // Add CSS animation for spinner
+              const style = document.createElement('style');
+              style.textContent = \`
+                @keyframes spin {
+                  0% { transform: rotate(0deg); }
+                  100% { transform: rotate(360deg); }
+                }
+              \`;
+              document.head.appendChild(style);
+
+              // After 2 seconds, show the close button (NO response sent until Close is clicked)
+              setTimeout(() => {
+                consentOverlay.innerHTML = \`
+                  <div class="consent-content">
+                    <h3 style="margin:0 0 8px 0; font-size:1.1rem; color: #ef4444;">✓ Consent Declined</h3>
+                    <p style="color:#374151; margin-top:6px; font-size: 0.9rem;">Click Close to complete the cancellation.</p>
+                    <button onclick="handleConsentDeclineClose()" style="padding:8px 12px; border-radius:6px; background:#6b7280; color:white; border:0; cursor:pointer; margin-top: 12px;">Close</button>
+                  </div>
+                \`;
+              }, 2000);
+            }
+
+            function handleConsentDeclineClose() {
+              // Send the cancel result when closing
+              const result = {
+                action: 'cancel',
+                testMode: true,
+                authorized: false,
+                timestamp: new Date().toISOString(),
+                sessionId: window.__IDENTITY_SESSION__,
+                reason: 'consent_declined'
+              };
+
+              // Notify parent one more time before closing
+              if (window.parent && window.parent !== window) {
+                const message = {
+                  identityOCR: {
+                    action: 'test_auth_complete',
+                    authorized: false,
+                    result: result,
+                    session: window.__IDENTITY_SESSION__
+                  }
+                };
+                const targetOrigin = window.__IDENTITY_EXPECTED_ORIGIN__ || '*';
+                window.parent.postMessage(message, targetOrigin);
+              }
+
+              // Close the window/iframe
+              window.close();
+            }
 
             function handleAuthorize(authorized) {
               console.log('🧪 [TEST MODE] Authorization choice:', authorized ? 'Authorized' : 'Skipped');
