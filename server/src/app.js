@@ -171,7 +171,7 @@ async function createVerifySessionHandler(req, res) {
     const sessionId = makeSessionId();
     const now = Date.now();
     // store minimal payload: who requested and optional customer id / returnTo
-  // Normalize/store requested fields: origin, idType, successUrl, webhooks
+  // Normalize/store requested fields: origin, idType, successUrl, webhooks, testMode
   const storedPayload = { ...(payload || {}) };
   if (payload.origin) storedPayload.origin = payload.origin;
   if (payload.idType) storedPayload.idType = payload.idType;
@@ -179,6 +179,10 @@ async function createVerifySessionHandler(req, res) {
   // Optional webhook URLs that caller can provide to be notified on success or cancellation
   if (payload.successWebhook) storedPayload.successWebhook = payload.successWebhook;
   if (payload.cancelWebhook) storedPayload.cancelWebhook = payload.cancelWebhook;
+  // Test mode flag - when true, enables testing/debugging features
+  if (typeof payload.testMode === 'boolean') storedPayload.testMode = payload.testMode;
+  // Auth required flag - when true in test mode, requires authentication
+  if (typeof payload.authRequired === 'boolean') storedPayload.authRequired = payload.authRequired;
 
   const sessionObj = { id: sessionId, createdAt: now, payload: storedPayload, status: 'pending' };
     const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 60 * 60);
@@ -289,6 +293,167 @@ app.get('/embed/session/:id', async (req, res) => {
     } catch (e) {
       expectedOrigin = '*';
     }
+    // Check if this is test mode - if so, show only authorization buttons
+    const isTestMode = session && session.payload && session.payload.testMode === true;
+    
+    if (isTestMode) {
+      // Show only authorization buttons for test mode
+      const testModeHtml = `<!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width,initial-scale=1" />
+          <title>Identity Verification Test Mode</title>
+          <script src="https://cdn.tailwindcss.com"></script>
+          <style>
+            body { margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+            .container { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+            .card { background: white; padding: 2rem; border-radius: 1rem; box-shadow: 0 20px 50px rgba(0,0,0,0.2); max-width: 400px; width: 90%; text-align: center; }
+            .title { font-size: 1.5rem; font-weight: bold; margin-bottom: 0.5rem; color: #1f2937; }
+            .subtitle { color: #6b7280; margin-bottom: 2rem; font-size: 0.95rem; }
+            .btn { padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: all 0.2s; margin: 0.5rem; min-width: 120px; border: none; font-size: 1rem; }
+            .btn-authorize { background: #10b981; color: white; }
+            .btn-authorize:hover { background: #059669; transform: translateY(-1px); }
+            .btn-skip { background: #6b7280; color: white; }
+            .btn-skip:hover { background: #4b5563; transform: translateY(-1px); }
+            .test-indicator { position: fixed; top: 1rem; right: 1rem; background: #f59e0b; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 0.8rem; font-weight: bold; }
+            .auth-info { background: #f3f4f6; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1.5rem; font-size: 0.9rem; color: #374151; }
+          </style>
+        </head>
+        <body>
+          <div class="test-indicator">🧪 TEST MODE</div>
+          <div class="container">
+            <div class="card">
+              <div class="title">Authorization Test</div>
+              <div class="subtitle">Test Mode - Choose Authorization Flow</div>
+              
+              <div class="auth-info">
+                This is a test mode simulation. Choose how you want to proceed with the identity verification process.
+              </div>
+              
+              <div>
+                <button class="btn btn-authorize" onclick="handleAuthorize(true)">
+                  🔐 Authorize & Proceed
+                </button>
+                <br>
+                <button class="btn btn-skip" onclick="handleAuthorize(false)">
+                  ❌ Cancel Authorization
+                </button>
+              </div>
+              
+              <div style="margin-top: 2rem; font-size: 0.8rem; color: #9ca3af;">
+                Session: ${session.id}<br>
+                Mode: Test Mode
+              </div>
+            </div>
+          </div>
+
+          <script>
+            window.__IDENTITY_SESSION__ = ${JSON.stringify(id)};
+            window.__IDENTITY_EXPECTED_ORIGIN__ = ${JSON.stringify(expectedOrigin)};
+            window.__IDENTITY_TEST_MODE__ = true;
+
+            function handleAuthorize(authorized) {
+              console.log('🧪 [TEST MODE] Authorization choice:', authorized ? 'Authorized' : 'Skipped');
+              
+              // Create result payload with mock identity data if authorized
+              const result = {
+                testMode: true,
+                authorized: authorized,
+                timestamp: new Date().toISOString(),
+                sessionId: window.__IDENTITY_SESSION__
+              };
+
+              // Add mock identity fields if authorized
+              if (authorized) {
+                result.fields = {
+                  firstName: 'John',
+                  lastName: 'Doe',
+                  idNumber: 'ID123456789',
+                  birthDate: '1990-01-15',
+                  confidence: 'high'
+                };
+                result.rawText = 'REPUBLIC OF THE PHILIPPINES\\nDRIVER\\'S LICENSE\\nLAST NAME: DOE\\nFIRST NAME: JOHN\\nID NO: ID123456789\\nBIRTH DATE: 01/15/1990\\nTEST MODE SAMPLE DATA';
+              }
+
+              // Notify parent window if embedded
+              if (window.parent && window.parent !== window) {
+                const message = {
+                  identityOCR: {
+                    action: 'test_auth_complete',
+                    authorized: authorized,
+                    result: result,
+                    session: window.__IDENTITY_SESSION__
+                  }
+                };
+                
+                const targetOrigin = window.__IDENTITY_EXPECTED_ORIGIN__ || '*';
+                window.parent.postMessage(message, targetOrigin);
+                console.log('🧪 [TEST MODE] Sent result to parent:', message);
+              }
+
+              // Update session on server
+              updateSessionResult(result, authorized);
+              
+              // Show confirmation
+              showConfirmation(authorized);
+            }
+
+            async function updateSessionResult(result, authorized) {
+              try {
+                const sessionId = window.__IDENTITY_SESSION__;
+                const status = authorized ? 'done' : 'cancelled';
+                
+                // Prepare payload similar to camera mode
+                const payload = {
+                  status: status,
+                  result: result,
+                  finishedAt: new Date().toISOString()
+                };
+
+                // If authorized, add the mock fields to match camera mode structure
+                if (authorized && result.fields) {
+                  payload.result.fields = result.fields;
+                  payload.result.rawText = result.rawText;
+                }
+                
+                const response = await fetch(\`/api/verify/session/\${sessionId}/result\`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(payload)
+                });
+                
+                console.log('🧪 [TEST MODE] Session updated:', await response.json());
+              } catch (error) {
+                console.error('🧪 [TEST MODE] Failed to update session:', error);
+              }
+            }
+
+            function showConfirmation(authorized) {
+              const card = document.querySelector('.card');
+              const status = authorized ? 'Authorized' : 'Cancelled';
+              const icon = authorized ? '✅' : '❌';
+              const color = authorized ? '#10b981' : '#ef4444';
+              
+              card.innerHTML = \`
+                <div style="color: \${color}; font-size: 3rem; margin-bottom: 1rem;">\${icon}</div>
+                <div class="title">\${status}</div>
+                <div class="subtitle">Test mode authorization complete</div>
+                <div class="auth-info">
+                  The authorization choice has been recorded and sent to the parent application.
+                </div>
+                <button class="btn btn-skip" onclick="window.close()" style="margin-top: 1rem;">
+                  Close
+                </button>
+              \`;
+            }
+          </script>
+        </body>
+      </html>`;
+      
+      return res.set('Content-Type', 'text/html; charset=utf-8').send(testModeHtml);
+    }
+
     // We'll serve a simple HTML wrapper that loads the public assets but includes embed flag and expected origin
     const html = `<!doctype html>
     <html lang="en">
@@ -327,6 +492,10 @@ app.get('/embed/session/:id', async (req, res) => {
           window.__IDENTITY_SUCCESS_URL__ = ${JSON.stringify((session && session.payload && session.payload.successUrl) ? session.payload.successUrl : null)};
           // Expose requested idType from session payload if provided
           window.__IDENTITY_REQUESTED_ID_TYPE__ = ${JSON.stringify((session && session.payload && session.payload.idType) ? session.payload.idType : null)};
+          // Expose testMode flag from session payload if provided
+          window.__IDENTITY_TEST_MODE__ = ${JSON.stringify((session && session.payload && typeof session.payload.testMode === 'boolean') ? session.payload.testMode : false)};
+          // Expose authRequired flag from session payload if provided
+          window.__IDENTITY_AUTH_REQUIRED__ = ${JSON.stringify((session && session.payload && typeof session.payload.authRequired === 'boolean') ? session.payload.authRequired : false)};
 
           // Safe helper to start camera once identityOCRApp is ready
           function safeStartCamera(timeoutMs = 5000) {

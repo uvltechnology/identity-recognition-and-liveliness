@@ -19,7 +19,53 @@
       const d = evt.data;
       const origin = evt.origin;
       if (d && d.identityOCR) {
-        showMessage(Object.assign({}, d.identityOCR, { _origin: origin }));
+        const message = Object.assign({}, d.identityOCR, { _origin: origin });
+        showMessage(message);
+        
+        // Log postMessage activity for live API monitoring
+        if (typeof logApiResponse === 'function') {
+          logApiResponse(200, {
+            type: 'PostMessage - Identity OCR',
+            action: message.action || 'unknown',
+            data: message,
+            origin: origin
+          });
+        }
+        
+        // Handle test mode authorization completion
+        if (message.action === 'test_auth_complete') {
+          console.log('🧪 Test Mode Authorization Result:', message);
+          
+          // Update session info with test result
+          const resultText = message.authorized ? 'Authorized' : 'Cancelled Authorization';
+          const statusColor = message.authorized ? '#10b981' : '#ef4444';
+          
+          const testResult = document.createElement('div');
+          testResult.style.cssText = `
+            margin-top: 1rem; 
+            padding: 1rem; 
+            background: ${statusColor}20; 
+            border: 1px solid ${statusColor}; 
+            border-radius: 6px;
+            color: ${statusColor};
+            font-weight: bold;
+          `;
+          testResult.innerHTML = `🧪 Test Mode Result: ${resultText}`;
+          
+          const sessionInfoDiv = document.getElementById('sessionInfo');
+          if (sessionInfoDiv) {
+            sessionInfoDiv.appendChild(testResult);
+          }
+        }
+      } else if (d && d.type) {
+        // Log other postMessage types for live API monitoring
+        if (typeof logApiResponse === 'function') {
+          logApiResponse(200, {
+            type: 'PostMessage - ' + d.type,
+            data: d,
+            origin: origin
+          });
+        }
       }
     }catch(e){ console.warn('message handler error', e); }
   });
@@ -30,9 +76,29 @@
     try{
   const frontendBase = frontendBaseEl.value?.trim() || undefined;
   const idType = (document.getElementById('demoIdType')?.value) || undefined;
-  const payload = { ...(frontendBase ? { frontendBase } : {}), ...(idType ? { idType } : {}) };
+  const testModeValue = (document.getElementById('testModeSelect')?.value) || 'camera';
+  
+  // Determine testMode based on selection
+  const testMode = testModeValue === 'test';
+  
+  const payload = { 
+    ...(frontendBase ? { frontendBase } : {}), 
+    ...(idType ? { idType } : {}),
+    testMode: testMode
+  };
+      // Log API request for live monitoring
+      if (typeof logApiRequest === 'function') {
+        logApiRequest('POST', '/api/verify/create', payload);
+      }
+      
       const res = await fetch('/api/verify/create', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(payload) });
       const json = await res.json();
+      
+      // Log API response for live monitoring
+      if (typeof logApiResponse === 'function') {
+        logApiResponse(res.status, json);
+      }
+      
       if (!json?.success) {
         sessionInfo.innerText = 'Failed to create session: ' + (json?.error || JSON.stringify(json));
         return;
@@ -78,9 +144,24 @@
       if (pollTimer) clearInterval(pollTimer);
       pollTimer = setInterval(async () => {
         try {
-          const resp = await fetch(`/api/verify/session/${encodeURIComponent(json.sessionId)}`);
+          const sessionUrl = `/api/verify/session/${encodeURIComponent(json.sessionId)}`;
+          
+          // Log polling request (only first few times to avoid spam)
+          const pollCount = window.pollRequestCount || 0;
+          if (pollCount < 3 && typeof logApiRequest === 'function') {
+            logApiRequest('GET', sessionUrl + ' (polling)', null);
+            window.pollRequestCount = pollCount + 1;
+          }
+          
+          const resp = await fetch(sessionUrl);
           if (!resp.ok) return;
           const j = await resp.json();
+          
+          // Log polling response (only if data changed)
+          if (pollCount < 3 && typeof logApiResponse === 'function') {
+            logApiResponse(resp.status, { ...j, note: 'Session polling update' });
+          }
+          
           sessionInfo.innerHTML = `<pre>${JSON.stringify(j, null, 2)}</pre>`;
         } catch (e) { /* ignore */ }
       }, 2000);
@@ -108,8 +189,22 @@
         payload: { note: 'Demo pushed result' },
         ttlSeconds: 300
       };
-      const resp = await fetch(`/api/verify/session/${encodeURIComponent(current.sessionId)}/result`, { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(payload) });
+      
+      const resultUrl = `/api/verify/session/${encodeURIComponent(current.sessionId)}/result`;
+      
+      // Log push result request for live monitoring
+      if (typeof logApiRequest === 'function') {
+        logApiRequest('POST', resultUrl, payload);
+      }
+      
+      const resp = await fetch(resultUrl, { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(payload) });
       const j = await resp.json();
+      
+      // Log push result response for live monitoring
+      if (typeof logApiResponse === 'function') {
+        logApiResponse(resp.status, j);
+      }
+      
       if (!j?.success) alert('Push failed: ' + JSON.stringify(j));
       sessionInfo.innerHTML = `<pre>${JSON.stringify(j, null, 2)}</pre>`;
     } catch (e) { alert('Error: ' + String(e)); }

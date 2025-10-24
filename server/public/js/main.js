@@ -2,6 +2,7 @@
 class IdentityOCRApp {
     constructor() {
         this.initialized = false;
+        this.testMode = window.__IDENTITY_TEST_MODE__ || false;
         this.init();
     }
 
@@ -286,6 +287,18 @@ class IdentityOCRApp {
         // Apply size via inline style to avoid becoming square
         guide.style.width = `${guideWidthPx}px`;
         guide.style.height = `${guideHeightPx}px`;
+        
+        // Test mode logging
+        if (this.testMode) {
+            console.log(`🧪 [TEST MODE] Guide rectangle sized:`, {
+                idType: idType,
+                containerWidth: containerWidth,
+                aspect: aspect,
+                widthFrac: widthFrac,
+                guideWidth: guideWidthPx + 'px',
+                guideHeight: guideHeightPx + 'px'
+            });
+        }
     }
 
     cleanup() {

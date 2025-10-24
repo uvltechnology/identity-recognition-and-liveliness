@@ -7,6 +7,10 @@ class CameraManager {
         this.currentDeviceId = null;
         this.devices = [];
         
+        // Initialize test mode
+        this.testMode = window.__IDENTITY_TEST_MODE__ || false;
+        this.authRequired = window.__IDENTITY_AUTH_REQUIRED__ || false;
+        
         this.initializeElements();
         // Per-ID Region of Interest to avoid scanning noisy areas (e.g., UMID signature strip)
         this.ROI_CONFIG = {
@@ -14,6 +18,10 @@ class CameraManager {
             'passport': { enabled: false },
             'national-id': { enabled: false }
         };
+        
+        // Initialize rotation functionality
+        this.initializeRotation();
+        
         this.setupEventListeners();
     }
 
@@ -488,6 +496,202 @@ class CameraManager {
     isActive() {
         return this.stream !== null && this.video.srcObject !== null;
     }
+
+    // Mobile detection
+    detectMobile() {
+        const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+        const isMobileUA = /android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+        const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+        const isSmallScreen = window.innerWidth <= 768 || window.innerHeight <= 768;
+        
+        return isMobileUA || (isTouchDevice && isSmallScreen);
+    }
+
+    // Initialize rotation state
+    initializeRotation() {
+        this.rotation = 0;
+        
+        // Add test mode indicator if enabled
+        if (this.testMode) {
+            this.addTestModeIndicator();
+            
+            // Add auth overlay if auth is required
+            setTimeout(() => {
+                this.addAuthOverlay();
+            }, 1000); // Delay to let camera initialize first
+        }
+    }
+
+    // Add test mode visual indicator
+    addTestModeIndicator() {
+        const existingIndicator = document.getElementById('test-mode-indicator');
+        if (existingIndicator) return;
+
+        const indicator = document.createElement('div');
+        indicator.id = 'test-mode-indicator';
+        
+        // Different indicator based on auth requirement
+        let content, bgColor, description;
+        if (this.authRequired) {
+            content = '🔐 TEST MODE - AUTH';
+            bgColor = '#e74c3c';
+            description = 'Test Mode with Authentication Required';
+        } else {
+            content = '🧪 TEST MODE - NO AUTH';
+            bgColor = '#f39c12';
+            description = 'Test Mode without Authentication';
+        }
+        
+        indicator.innerHTML = content;
+        indicator.title = description;
+        indicator.style.cssText = `
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: ${bgColor};
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            z-index: 9999;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            cursor: help;
+        `;
+        document.body.appendChild(indicator);
+
+        // Log test mode activation with auth details
+        console.log(`🧪 TEST MODE ACTIVATED - ${description}`);
+        console.log('🧪 [TEST MODE] Configuration:', { 
+            testMode: this.testMode, 
+            authRequired: this.authRequired 
+        });
+    }
+
+    // Rotation function - Toggle between portrait (0°) and landscape (90°)
+    rotateCamera(degrees) {
+        this.rotation = degrees;
+        const container = document.querySelector('.camera-container');
+        const alignmentFeedback = document.getElementById('alignment-feedback');
+        
+        if (container) {
+            // Remove existing rotation classes
+            container.classList.remove('rotate-90');
+            
+            // Add rotation class only for landscape mode
+            if (degrees === 90) {
+                container.classList.add('rotate-90');
+            }
+            
+            // Test mode logging
+            if (this.testMode) {
+                console.log(`🧪 [TEST MODE] Camera rotated to ${degrees} degrees`);
+                console.log(`🧪 [TEST MODE] Container classes:`, container.className);
+            } else {
+                console.log(`Camera rotated to ${degrees} degrees`);
+            }
+        }
+        
+        // Adjust alignment feedback text for readability
+        if (alignmentFeedback) {
+            const feedbackMessage = alignmentFeedback.querySelector('.feedback-message');
+            if (feedbackMessage) {
+                // Counter-rotate the text so it remains readable in landscape mode
+                if (degrees === 90) {
+                    feedbackMessage.style.transform = 'rotate(-90deg)';
+                    feedbackMessage.style.whiteSpace = 'nowrap';
+                } else {
+                    feedbackMessage.style.transform = 'none';
+                    feedbackMessage.style.whiteSpace = 'normal';
+                }
+                
+                // Test mode logging
+                if (this.testMode) {
+                    console.log(`🧪 [TEST MODE] Feedback text transform:`, feedbackMessage.style.transform);
+                }
+            }
+        }
+        
+        // Trigger guide rectangle resize if available
+        setTimeout(() => {
+            try {
+                if (window.identityOCRApp && typeof window.identityOCRApp.sizeGuideRectangle === 'function') {
+                    window.identityOCRApp.sizeGuideRectangle();
+                }
+            } catch (e) { /* ignore */ }
+        }, 100);
+    }
+
+    // Toggle between portrait (0°) and landscape (90°) only
+    cycleRotation() {
+        const next = this.rotation === 0 ? 90 : 0;
+        
+        // Test mode logging
+        if (this.testMode) {
+            console.log(`🧪 [TEST MODE] Cycling rotation from ${this.rotation}° to ${next}°`);
+        }
+        
+        this.rotateCamera(next);
+    }
+
+    // Test mode method to log camera state
+    logCameraState() {
+        if (!this.testMode) return;
+        
+        console.log('🧪 [TEST MODE] Current Camera State:', {
+            rotation: this.rotation,
+            isActive: this.isActive(),
+            currentDeviceId: this.currentDeviceId,
+            deviceCount: this.devices.length,
+            videoElement: this.video ? 'present' : 'missing',
+            stream: this.stream ? 'active' : 'inactive',
+            authRequired: this.authRequired
+        });
+    }
+
+    // Add authentication overlay if required in test mode
+    addAuthOverlay() {
+        if (!this.testMode || !this.authRequired) return;
+        
+        const existingOverlay = document.getElementById('auth-test-overlay');
+        if (existingOverlay) return;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'auth-test-overlay';
+        overlay.innerHTML = `
+            <div style="text-align: center; color: white;">
+                <div style="font-size: 24px; margin-bottom: 10px;">🔐</div>
+                <div style="font-size: 18px; margin-bottom: 10px; font-weight: bold;">Authentication Required</div>
+                <div style="font-size: 14px; margin-bottom: 20px;">This is a test mode simulation of authentication requirements</div>
+                <button id="simulate-auth" style="background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
+                    Simulate Authentication ✓
+                </button>
+            </div>
+        `;
+        overlay.style.cssText = `
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        `;
+
+        // Add overlay to camera container
+        const cameraContainer = document.querySelector('.camera-container');
+        if (cameraContainer) {
+            cameraContainer.style.position = 'relative';
+            cameraContainer.appendChild(overlay);
+
+            // Handle auth simulation
+            const authBtn = overlay.querySelector('#simulate-auth');
+            authBtn.addEventListener('click', () => {
+                console.log('🧪 [TEST MODE] Authentication simulated - removing auth overlay');
+                overlay.remove();
+            });
+        }
+    }
 }
 
 // Initialize camera manager when DOM is loaded
@@ -498,3 +702,16 @@ if (document.readyState === 'loading') {
 } else {
     window.cameraManager = new CameraManager();
 }
+
+// Global window functions for rotation (backward compatibility)
+window.rotateCamera = function(degrees) {
+    if (window.cameraManager) {
+        window.cameraManager.rotateCamera(degrees);
+    }
+};
+
+window.cycleRotation = function() {
+    if (window.cameraManager) {
+        window.cameraManager.cycleRotation();
+    }
+};

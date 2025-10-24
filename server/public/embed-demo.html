@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Identity Embed Demo</title>
+    <title>Identity Verification - Documentation & Demo</title>
     <style>
         body {
             font-family: system-ui, Segoe UI, Roboto, Arial;
@@ -61,7 +61,202 @@
             border-radius: 6px;
             border: 1px solid #cbd5e1;
             background: #1d4ed8;
-            color: white
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        button:hover {
+            background: #1e40af;
+            transform: translateY(-1px);
+        }
+
+        .btn-success {
+            background: #10b981 !important;
+        }
+
+        .btn-success:hover {
+            background: #059669 !important;
+        }
+
+        .btn-danger {
+            background: #ef4444 !important;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626 !important;
+        }
+
+        .docs-section {
+            background: #f8fafc;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            border-left: 4px solid #1d4ed8;
+        }
+
+        .docs-section h2 {
+            margin-top: 0;
+            color: #1f2937;
+        }
+
+        .code-block {
+            background: #1f2937;
+            color: #e5e7eb;
+            padding: 16px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin: 12px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+
+        .api-endpoint {
+            background: #ecfdf5;
+            border: 1px solid #10b981;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-family: monospace;
+            color: #065f46;
+            margin: 8px 0;
+        }
+
+        .parameter {
+            background: #fff7ed;
+            border: 1px solid #f59e0b;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            color: #92400e;
+            font-size: 12px;
+        }
+
+        .nav-tabs {
+            display: flex;
+            border-bottom: 2px solid #e5e7eb;
+            margin-bottom: 20px;
+        }
+
+        .nav-tab {
+            padding: 12px 20px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            color: #6b7280;
+            font-weight: 500;
+        }
+
+        .nav-tab.active {
+            color: #1d4ed8;
+            border-bottom: 2px solid #1d4ed8;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .info-card {
+            background: #eff6ff;
+            border: 1px solid #3b82f6;
+            border-radius: 6px;
+            padding: 16px;
+            margin: 12px 0;
+        }
+
+        .warning-card {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            border-radius: 6px;
+            padding: 16px;
+            margin: 12px 0;
+        }
+
+        .success-card {
+            background: #ecfdf5;
+            border: 1px solid #10b981;
+            border-radius: 6px;
+            padding: 16px;
+            margin: 12px 0;
+        }
+
+        .live-api-grid {
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            gap: 16px; 
+            margin: 16px 0;
+        }
+
+        .api-log-section h4 {
+            margin: 0 0 8px 0; 
+            display: flex; 
+            align-items: center; 
+            gap: 8px;
+        }
+
+        .api-log-box {
+            height: 200px; 
+            overflow-y: auto; 
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .api-log-entry {
+            border-bottom: 1px solid #374151; 
+            padding: 8px 0; 
+            margin-bottom: 8px;
+        }
+
+        .api-timestamp {
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        .api-data {
+            margin-top: 4px; 
+            padding-left: 12px; 
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .live-controls {
+            display: flex; 
+            gap: 12px; 
+            align-items: center; 
+            margin-top: 12px; 
+            padding: 12px;
+            background: #f8fafc;
+            border-radius: 6px;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        @media (max-width: 768px) {
+            .live-api-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .live-controls {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
         }
 
         /* Responsive tweaks */
@@ -123,9 +318,92 @@
 
 <body>
     <div class="wrap">
-        <h1>Identity Embed Demo</h1>
-        <p>Creates a verification session, embeds the identity camera iframe, and listens for extracted fields via
-            postMessage.</p>
+        <h1>Identity Verification - Documentation & Demo</h1>
+        
+        <!-- Navigation Tabs -->
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="showTab('demo')">Live Demo</button>
+            <button class="nav-tab" onclick="showTab('api')">API Documentation</button>
+            <button class="nav-tab" onclick="showTab('integration')">Integration Guide</button>
+            <button class="nav-tab" onclick="showTab('examples')">Code Examples</button>
+        </div>
+
+        <!-- Demo Tab -->
+        <div id="demo-tab" class="tab-content active">
+            <h2>Live Demo</h2>
+            <p>Creates a verification session, embeds the identity camera iframe, and listens for extracted fields via postMessage.</p>
+
+            <!-- Live API Usage Section -->
+            <div class="docs-section" style="margin-bottom: 20px;">
+                <h3>🔴 Live API Usage</h3>
+                <p>Dynamic API payload based on your form selections:</p>
+                
+                <!-- Dynamic Payload Preview -->
+                <div class="info-card" style="margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <h4 style="margin: 0; color: #1d4ed8;">📋 Current API Payload</h4>
+                        <div style="display: flex; gap: 8px;">
+                            <button onclick="toggleCurlCommand()" style="font-size: 11px; padding: 4px 8px; background: #6366f1; border: none; color: white; border-radius: 4px; cursor: pointer;">
+                                🔧 Show cURL
+                            </button>
+                            <button onclick="showPayloadExamples()" style="font-size: 11px; padding: 4px 8px; background: #8b5cf6; border: none; color: white; border-radius: 4px; cursor: pointer;">
+                                📚 Examples
+                            </button>
+                        </div>
+                    </div>
+                    <div id="dynamicPayload" class="code-block" style="margin: 8px 0; font-size: 13px;">
+                        <div style="color: #9ca3af; font-style: italic;">Select options below to see dynamic payload</div>
+                    </div>
+                    <div id="curlCommand" class="code-block" style="margin: 8px 0; font-size: 12px; display: none; background: #0f172a;">
+                        <!-- cURL command will be inserted here -->
+                    </div>
+                    <div style="font-size: 12px; color: #6b7280; margin-top: 8px;">
+                        💡 This payload updates automatically as you change form values
+                    </div>
+                </div>
+                
+                <div class="live-api-grid">
+                    <div class="api-log-section">
+                        <h4 style="color: #059669;">
+                            📤 API Requests
+                            <div class="status-indicator"></div>
+                        </h4>
+                        <div id="liveRequests" class="code-block api-log-box">
+                            <div style="color: #9ca3af; font-style: italic;">No requests yet - click "Create & Embed" to see API calls</div>
+                        </div>
+                    </div>
+                    <div class="api-log-section">
+                        <h4 style="color: #3b82f6;">
+                            📥 API Responses  
+                            <div class="status-indicator"></div>
+                        </h4>
+                        <div id="liveResponses" class="code-block api-log-box">
+                            <div style="color: #9ca3af; font-style: italic;">No responses yet - responses will appear here</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="live-controls">
+                    <button id="clearApiLogs" onclick="clearApiLogs()" class="btn-danger" style="font-size: 12px; padding: 6px 12px;">
+                        🗑️ Clear Logs
+                    </button>
+                    <button id="copyPayload" onclick="copyCurrentPayload()" class="btn-success" style="font-size: 12px; padding: 6px 12px;">
+                        📋 Copy Payload
+                    </button>
+                    <label style="display: flex; align-items: center; gap: 6px; font-size: 14px;">
+                        <input type="checkbox" id="autoScroll" checked>
+                        ⬇️ Auto-scroll to latest
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; font-size: 14px;">
+                        <input type="checkbox" id="timestampToggle" checked>
+                        🕐 Show timestamps
+                    </label>
+                    <span style="font-size: 12px; color: #6b7280; display: flex; align-items: center; gap: 4px;">
+                        <div class="status-indicator"></div>
+                        Live API monitoring enabled
+                    </span>
+                </div>
+            </div>
 
         <div class="controls">
             <label>Frontend base (optional): <input id="frontendBase" placeholder="http://localhost:5173"
@@ -135,6 +413,11 @@
                     <option value="national-id">National ID</option>
                     <option value="passport">Passport</option>
                     <option value="umid">UMID</option>
+                </select></label>
+            <label style="margin-left:8px">Mode: <select id="testModeSelect"
+                    style="padding:6px;border-radius:6px;border:1px solid #cbd5e1;margin-left:6px">
+                    <option value="camera">Camera Mode</option>
+                    <option value="test">Test Mode</option>
                 </select></label>
             <label style="margin-left:8px">Success Url: <input id="successWebhook"
                     placeholder="https://example.com/webhook/success"
@@ -165,18 +448,838 @@
             </div>
         </div>
 
-        <div class="panel">
-            <h3>Session Info</h3>
-            <div id="sessionInfo">No session yet</div>
+            <div class="panel">
+                <h3>Session Info</h3>
+                <div id="sessionInfo">No session yet</div>
+            </div>
+
+            <div class="panel">
+                <h3>Received Messages</h3>
+                <div id="messages"><em>None</em></div>
+            </div>
         </div>
 
-        <div class="panel">
-            <h3>Received Messages</h3>
-            <div id="messages"><em>None</em></div>
+        <!-- API Documentation Tab -->
+        <div id="api-tab" class="tab-content">
+            <div class="docs-section">
+                <h2>Identity Verification API</h2>
+                <p>The Identity Verification service provides secure document scanning and data extraction capabilities through both camera-based and test modes.</p>
+                
+                <div class="info-card">
+                    <strong>Base URL:</strong> <span class="api-endpoint">http://localhost:3000</span>
+                </div>
+
+                <h3>Embed Integration</h3>
+                <div class="api-endpoint">GET /embed</div>
+                <p>Renders the identity verification interface in an embeddable iframe.</p>
+                
+                <h4>Query Parameters</h4>
+                <ul>
+                    <li><span class="parameter">testMode</span> (boolean) - Enable test mode to skip camera and use mock data</li>
+                    <li><span class="parameter">sessionId</span> (string) - Optional session identifier for tracking</li>
+                </ul>
+
+                <div class="code-block">
+&lt;iframe 
+    src="http://localhost:3000/embed?testMode=false" 
+    width="100%" 
+    height="600"
+    frameborder="0"&gt;
+&lt;/iframe&gt;
+                </div>
+
+                <h3>Response Format</h3>
+                <p>Both camera and test modes return consistent identity data:</p>
+                <div class="code-block">
+{
+  "success": true,
+  "data": {
+    "firstName": "John",
+    "lastName": "Doe", 
+    "idNumber": "1234567890",
+    "birthDate": "1990-01-15",
+    "confidence": 0.95
+  },
+  "mode": "camera" | "test"
+}
+                </div>
+
+                <h3>Mobile Features</h3>
+                <div class="success-card">
+                    <strong>Automatic Mobile Support:</strong> The system detects mobile devices and provides rotation controls for optimal camera positioning.
+                </div>
+                <ul>
+                    <li>Portrait/Landscape rotation toggle (0° ↔ 90°)</li>
+                    <li>Touch-friendly interface</li>
+                    <li>Responsive design</li>
+                    <li>Automatic device detection</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Integration Guide Tab -->
+        <div id="integration-tab" class="tab-content">
+            <div class="docs-section">
+                <h2>Integration Guide</h2>
+                
+                <h3>1. Basic Iframe Integration</h3>
+                <p>The simplest way to integrate the identity verification system:</p>
+                <div class="code-block">
+&lt;iframe 
+    id="identity-frame"
+    src="http://localhost:3000/embed" 
+    width="100%" 
+    height="600"
+    frameborder="0"&gt;
+&lt;/iframe&gt;
+                </div>
+
+                <h3>2. Listening for Results</h3>
+                <p>Handle verification results using the postMessage API:</p>
+                <div class="code-block">
+window.addEventListener('message', function(event) {
+    if (event.origin !== 'http://localhost:3000') return;
+    
+    if (event.data.type === 'IDENTITY_VERIFIED') {
+        const identityData = event.data.data;
+        console.log('Verification complete:', identityData);
+        
+        // Process the identity data
+        handleVerificationResult(identityData);
+    }
+});
+                </div>
+
+                <h3>3. Test Mode Integration</h3>
+                <div class="warning-card">
+                    <strong>Note:</strong> Test mode should only be used in development environments. It bypasses camera capture and returns mock data.
+                </div>
+                
+                <div class="code-block">
+// Enable test mode
+const testModeUrl = 'http://localhost:3000/embed?testMode=true';
+document.getElementById('identity-frame').src = testModeUrl;
+                </div>
+
+                <h3>4. Mobile Considerations</h3>
+                <div class="success-card">
+                    <strong>Mobile Support:</strong> The system automatically detects mobile devices and provides rotation controls for optimal camera positioning.
+                </div>
+                
+                <ul>
+                    <li>Automatic mobile detection</li>
+                    <li>Portrait/Landscape rotation toggle</li>
+                    <li>Touch-friendly interface</li>
+                    <li>Responsive design</li>
+                </ul>
+
+                <h3>5. Error Handling</h3>
+                <div class="code-block">
+window.addEventListener('message', function(event) {
+    if (event.origin !== 'http://localhost:3000') return;
+    
+    switch(event.data.type) {
+        case 'IDENTITY_VERIFIED':
+            handleSuccess(event.data.data);
+            break;
+        case 'VERIFICATION_ERROR':
+            handleError(event.data.error);
+            break;
+        case 'USER_CANCELLED':
+            handleCancellation();
+            break;
+    }
+});
+                </div>
+            </div>
+        </div>
+
+        <!-- Code Examples Tab -->
+        <div id="examples-tab" class="tab-content">
+            <div class="docs-section">
+                <h2>Code Examples</h2>
+                
+                <h3>React Integration</h3>
+                <div class="code-block">
+import React, { useEffect, useRef, useState } from 'react';
+
+const IdentityVerification = ({ testMode = false, onResult }) => {
+    const iframeRef = useRef(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        const handleMessage = (event) => {
+            if (event.origin !== 'http://localhost:3000') return;
+            
+            if (event.data.type === 'IDENTITY_VERIFIED') {
+                setIsLoading(false);
+                onResult(event.data.data);
+            }
+        };
+
+        window.addEventListener('message', handleMessage);
+        return () => window.removeEventListener('message', handleMessage);
+    }, [onResult]);
+
+    const embedUrl = `http://localhost:3000/embed?testMode=${testMode}`;
+
+    return (
+        &lt;div className="identity-verification"&gt;
+            {isLoading && &lt;div&gt;Loading verification...&lt;/div&gt;}
+            &lt;iframe
+                ref={iframeRef}
+                src={embedUrl}
+                width="100%"
+                height="600"
+                frameBorder="0"
+                title="Identity Verification"
+            /&gt;
+        &lt;/div&gt;
+    );
+};
+
+export default IdentityVerification;
+                </div>
+
+                <h3>Vue.js Integration</h3>
+                <div class="code-block">
+&lt;template&gt;
+  &lt;div class="identity-verification"&gt;
+    &lt;div v-if="loading"&gt;Loading verification...&lt;/div&gt;
+    &lt;iframe
+      ref="identityFrame"
+      :src="embedUrl"
+      width="100%"
+      height="600"
+      frameborder="0"
+      title="Identity Verification"
+    &gt;&lt;/iframe&gt;
+  &lt;/div&gt;
+&lt;/template&gt;
+
+&lt;script&gt;
+export default {
+  name: 'IdentityVerification',
+  props: {
+    testMode: {
+      type: Boolean,
+      default: false
+    }
+  },
+  data() {
+    return {
+      loading: true
+    };
+  },
+  computed: {
+    embedUrl() {
+      return `http://localhost:3000/embed?testMode=${this.testMode}`;
+    }
+  },
+  mounted() {
+    window.addEventListener('message', this.handleMessage);
+  },
+  beforeUnmount() {
+    window.removeEventListener('message', this.handleMessage);
+  },
+  methods: {
+    handleMessage(event) {
+      if (event.origin !== 'http://localhost:3000') return;
+      
+      if (event.data.type === 'IDENTITY_VERIFIED') {
+        this.loading = false;
+        this.$emit('verification-complete', event.data.data);
+      }
+    }
+  }
+};
+&lt;/script&gt;
+                </div>
+
+                <h3>Vanilla JavaScript</h3>
+                <div class="code-block">
+class IdentityVerification {
+    constructor(container, options = {}) {
+        this.container = container;
+        this.testMode = options.testMode || false;
+        this.onResult = options.onResult || (() => {});
+        
+        this.init();
+    }
+    
+    init() {
+        // Create iframe
+        this.iframe = document.createElement('iframe');
+        this.iframe.src = `http://localhost:3000/embed?testMode=${this.testMode}`;
+        this.iframe.width = '100%';
+        this.iframe.height = '600';
+        this.iframe.frameBorder = '0';
+        
+        // Add message listener
+        window.addEventListener('message', this.handleMessage.bind(this));
+        
+        // Append to container
+        this.container.appendChild(this.iframe);
+    }
+    
+    handleMessage(event) {
+        if (event.origin !== 'http://localhost:3000') return;
+        
+        if (event.data.type === 'IDENTITY_VERIFIED') {
+            this.onResult(event.data.data);
+        }
+    }
+    
+    destroy() {
+        window.removeEventListener('message', this.handleMessage);
+        if (this.iframe && this.iframe.parentNode) {
+            this.iframe.parentNode.removeChild(this.iframe);
+        }
+    }
+}
+
+// Usage
+const verification = new IdentityVerification(
+    document.getElementById('verification-container'),
+    {
+        testMode: false,
+        onResult: (data) => console.log('Verification result:', data)
+    }
+);
+                </div>
+
+                <h3>Node.js Backend Integration</h3>
+                <div class="code-block">
+const express = require('express');
+const app = express();
+
+// Webhook endpoint to receive verification results
+app.post('/webhook/identity-verified', (req, res) => {
+    const identityData = req.body;
+    
+    // Process the verification result
+    console.log('Identity verified:', identityData);
+    
+    // Store in database, send confirmation email, etc.
+    processIdentityVerification(identityData);
+    
+    res.json({ success: true });
+});
+
+// Serve the verification page
+app.get('/verify', (req, res) => {
+    res.send(`
+        &lt;!DOCTYPE html&gt;
+        &lt;html&gt;
+        &lt;head&gt;
+            &lt;title&gt;Identity Verification&lt;/title&gt;
+        &lt;/head&gt;
+        &lt;body&gt;
+            &lt;iframe 
+                src="http://localhost:3000/embed" 
+                width="100%" 
+                height="600"
+                frameborder="0"&gt;
+            &lt;/iframe&gt;
+        &lt;/body&gt;
+        &lt;/html&gt;
+    `);
+});
+
+app.listen(8080, () => {
+    console.log('Server running on http://localhost:8080');
+});
+                </div>
+            </div>
         </div>
     </div>
 
     <script src="/js/embed-demo.js"></script>
+    <script>
+        // Tab switching functionality
+        function showTab(tabName) {
+            // Hide all tab contents
+            const tabContents = document.querySelectorAll('.tab-content');
+            tabContents.forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Remove active class from all nav tabs
+            const navTabs = document.querySelectorAll('.nav-tab');
+            navTabs.forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            document.getElementById(tabName + '-tab').classList.add('active');
+            
+            // Add active class to clicked nav tab
+            event.target.classList.add('active');
+        }
+        
+        // Live API monitoring functionality
+        let apiRequestCount = 0;
+        let apiResponseCount = 0;
+        let currentPayload = {};
+        
+        // Dynamic payload generation based on form inputs
+        function generateCurrentPayload() {
+            const frontendBase = document.getElementById('frontendBase')?.value?.trim() || '';
+            const idType = document.getElementById('demoIdType')?.value || 'national-id';
+            const testModeValue = document.getElementById('testModeSelect')?.value || 'camera';
+            const successWebhook = document.getElementById('successWebhook')?.value?.trim() || '';
+            const cancelWebhook = document.getElementById('cancelWebhook')?.value?.trim() || '';
+            
+            const testMode = testModeValue === 'test';
+            
+            // Always start with default payload structure
+            const payload = {
+                testMode: testMode
+            };
+            
+            // Add optional values if provided
+            if (frontendBase) payload.frontendBase = frontendBase;
+            if (idType && idType !== 'national-id') payload.idType = idType; // Only add if not default
+            if (successWebhook) payload.successWebhook = successWebhook;
+            if (cancelWebhook) payload.cancelWebhook = cancelWebhook;
+            
+            currentPayload = payload;
+            return payload;
+        }
+
+        // Generate default payload for initial display
+        function getDefaultPayload() {
+            return {
+                testMode: false
+            };
+        }
+        
+        function updateDynamicPayload(isInitial = false) {
+            const payload = isInitial ? getDefaultPayload() : generateCurrentPayload();
+            const payloadElement = document.getElementById('dynamicPayload');
+            
+            if (payloadElement) {
+                const jsonString = JSON.stringify(payload, null, 2);
+                const timestamp = new Date().toLocaleTimeString();
+                
+                // Add visual feedback for update (skip animation for initial load)
+                if (!isInitial) {
+                    payloadElement.style.transition = 'all 0.3s ease';
+                    payloadElement.style.background = '#065f46';
+                }
+                
+                const updateLabel = isInitial ? 'Default' : 'Live Update';
+                const statusEmoji = isInitial ? '🎯' : '🔄';
+                
+                payloadElement.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <div style="color: #10b981; font-weight: bold;">POST /api/verify/create</div>
+                        <div style="color: #9ca3af; font-size: 11px;">${statusEmoji} ${updateLabel}: ${timestamp}</div>
+                    </div>
+                    <div style="color: #e5e7eb; line-height: 1.4;">${jsonString}</div>
+                    <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #374151;">
+                        <div style="color: #9ca3af; font-size: 11px;">
+                            📊 Payload size: ${JSON.stringify(payload).length} bytes | 
+                            🔧 Properties: ${Object.keys(payload).length} | 
+                            🧪 Test mode: ${payload.testMode ? 'ON' : 'OFF'}
+                            ${isInitial ? ' | ⚠️ Change form values to see live updates' : ''}
+                        </div>
+                    </div>
+                `;
+                
+                // Reset background after animation (skip for initial)
+                if (!isInitial) {
+                    setTimeout(() => {
+                        payloadElement.style.background = '#1f2937';
+                    }, 300);
+                }
+            }
+        }
+        
+        function copyCurrentPayload() {
+            const payload = generateCurrentPayload();
+            const jsonString = JSON.stringify(payload, null, 2);
+            
+            navigator.clipboard.writeText(jsonString).then(() => {
+                const copyBtn = document.getElementById('copyPayload');
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = '✅ Copied!';
+                copyBtn.style.background = '#10b981';
+                
+                setTimeout(() => {
+                    copyBtn.textContent = originalText;
+                    copyBtn.style.background = '';
+                }, 2000);
+            }).catch(() => {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = jsonString;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                
+                const copyBtn = document.getElementById('copyPayload');
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = '✅ Copied!';
+                setTimeout(() => copyBtn.textContent = originalText, 2000);
+            });
+        }
+        
+        function generateCurlCommand() {
+            const payload = generateCurrentPayload();
+            const jsonString = JSON.stringify(payload);
+            const baseUrl = window.location.origin;
+            
+            return `curl -X POST "${baseUrl}/api/verify/create" \\
+  -H "Content-Type: application/json" \\
+  -d '${jsonString}'`;
+        }
+        
+        function toggleCurlCommand() {
+            const curlElement = document.getElementById('curlCommand');
+            const isVisible = curlElement.style.display !== 'none';
+            
+            if (isVisible) {
+                curlElement.style.display = 'none';
+                event.target.textContent = '🔧 Show cURL';
+            } else {
+                const curlCmd = generateCurlCommand();
+                curlElement.innerHTML = `
+                    <div style="color: #f59e0b; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+                        <span>cURL Command</span>
+                        <button onclick="copyCurlCommand()" style="font-size: 10px; padding: 2px 6px; background: #059669; border: none; color: white; border-radius: 3px; cursor: pointer;">
+                            Copy cURL
+                        </button>
+                    </div>
+                    <div style="color: #e5e7eb; font-family: monospace; white-space: pre-wrap; word-break: break-all;">${curlCmd}</div>
+                `;
+                curlElement.style.display = 'block';
+                event.target.textContent = '❌ Hide cURL';
+            }
+        }
+        
+        function copyCurlCommand() {
+            const curlCmd = generateCurlCommand();
+            
+            navigator.clipboard.writeText(curlCmd).then(() => {
+                const copyBtn = event.target;
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = '✅ Copied!';
+                setTimeout(() => copyBtn.textContent = originalText, 2000);
+            }).catch(() => {
+                // Fallback
+                const textArea = document.createElement('textarea');
+                textArea.value = curlCmd;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                
+                const copyBtn = event.target;
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = '✅ Copied!';
+                setTimeout(() => copyBtn.textContent = originalText, 2000);
+            });
+        }
+
+        // Payload examples functionality
+        function showPayloadExamples() {
+            const examples = [
+                {
+                    name: "Basic Camera Mode",
+                    description: "Minimal payload for camera-based verification",
+                    payload: { testMode: false }
+                },
+                {
+                    name: "Test Mode Only", 
+                    description: "Skip camera, use test authorization flow",
+                    payload: { testMode: true }
+                },
+                {
+                    name: "Passport + Test Mode",
+                    description: "Test mode with passport document type",
+                    payload: { testMode: true, idType: "passport" }
+                },
+                {
+                    name: "Production Setup",
+                    description: "Full configuration with webhooks",
+                    payload: { 
+                        testMode: false, 
+                        idType: "national-id",
+                        successWebhook: "https://api.yourapp.com/webhook/success",
+                        cancelWebhook: "https://api.yourapp.com/webhook/cancel"
+                    }
+                },
+                {
+                    name: "Development with Frontend",
+                    description: "Local development with custom frontend base",
+                    payload: {
+                        testMode: true,
+                        frontendBase: "http://localhost:5173",
+                        idType: "umid"
+                    }
+                }
+            ];
+
+            let modalHtml = `
+                <div id="examplesModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 20px;">
+                    <div style="background: white; border-radius: 12px; max-width: 800px; width: 100%; max-height: 80vh; overflow-y: auto; padding: 24px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #e5e7eb; padding-bottom: 16px;">
+                            <h3 style="margin: 0; color: #1f2937;">📚 Payload Examples</h3>
+                            <button onclick="closeExamplesModal()" style="background: #ef4444; border: none; color: white; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-size: 16px;">✕</button>
+                        </div>
+                        <div style="display: grid; gap: 16px;">
+            `;
+
+            examples.forEach((example, index) => {
+                modalHtml += `
+                    <div style="border: 1px solid #d1d5db; border-radius: 8px; padding: 16px; background: #f9fafb;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                            <div>
+                                <h4 style="margin: 0 0 4px 0; color: #1d4ed8;">${example.name}</h4>
+                                <p style="margin: 0; color: #6b7280; font-size: 14px;">${example.description}</p>
+                            </div>
+                            <button onclick="usePayloadExample(${index})" style="background: #10b981; border: none; color: white; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap; margin-left: 12px;">
+                                Use This
+                            </button>
+                        </div>
+                        <div style="background: #1f2937; color: #e5e7eb; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; overflow-x: auto;">
+                            ${JSON.stringify(example.payload, null, 2)}
+                        </div>
+                    </div>
+                `;
+            });
+
+            modalHtml += `
+                        </div>
+                        <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid #e5e7eb; text-align: center;">
+                            <button onclick="closeExamplesModal()" style="background: #6b7280; border: none; color: white; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            
+            // Store examples in global scope for use
+            window.payloadExamples = examples;
+        }
+
+        function usePayloadExample(index) {
+            const example = window.payloadExamples[index];
+            const payload = example.payload;
+            
+            // Set form values based on example payload
+            if (payload.frontendBase) {
+                document.getElementById('frontendBase').value = payload.frontendBase;
+            } else {
+                document.getElementById('frontendBase').value = '';
+            }
+            
+            if (payload.idType) {
+                document.getElementById('demoIdType').value = payload.idType;
+            } else {
+                document.getElementById('demoIdType').value = 'national-id';
+            }
+            
+            document.getElementById('testModeSelect').value = payload.testMode ? 'test' : 'camera';
+            
+            if (payload.successWebhook) {
+                document.getElementById('successWebhook').value = payload.successWebhook;
+            } else {
+                document.getElementById('successWebhook').value = '';
+            }
+            
+            if (payload.cancelWebhook) {
+                document.getElementById('cancelWebhook').value = payload.cancelWebhook;
+            } else {
+                document.getElementById('cancelWebhook').value = '';
+            }
+            
+            // Update the payload display
+            updateDynamicPayload(false);
+            
+            // Close the modal
+            closeExamplesModal();
+            
+            // Show success message
+            const exampleBtn = document.querySelector('button[onclick="showPayloadExamples()"]');
+            const originalText = exampleBtn.textContent;
+            exampleBtn.textContent = '✅ Applied!';
+            exampleBtn.style.background = '#10b981';
+            setTimeout(() => {
+                exampleBtn.textContent = originalText;
+                exampleBtn.style.background = '#8b5cf6';
+            }, 2000);
+        }
+
+        function closeExamplesModal() {
+            const modal = document.getElementById('examplesModal');
+            if (modal) {
+                modal.remove();
+            }
+        }
+        
+        function logApiRequest(method, url, data = null) {
+            apiRequestCount++;
+            const timestamp = new Date().toLocaleTimeString();
+            const requestElement = document.getElementById('liveRequests');
+            
+            // Clear placeholder text if this is first request
+            if (apiRequestCount === 1) {
+                requestElement.innerHTML = '';
+            }
+            
+            const requestHtml = `
+                <div style="border-bottom: 1px solid #374151; padding: 8px 0; margin-bottom: 8px;">
+                    <div style="color: #10b981; font-weight: bold;">[${timestamp}] ${method} ${url}</div>
+                    ${data ? `<div style="color: #e5e7eb; margin-top: 4px; padding-left: 12px;">${JSON.stringify(data, null, 2)}</div>` : ''}
+                </div>
+            `;
+            
+            requestElement.innerHTML += requestHtml;
+            
+            if (document.getElementById('autoScroll').checked) {
+                requestElement.scrollTop = requestElement.scrollHeight;
+            }
+        }
+        
+        function logApiResponse(status, data, error = null) {
+            apiResponseCount++;
+            const timestamp = new Date().toLocaleTimeString();
+            const responseElement = document.getElementById('liveResponses');
+            
+            // Clear placeholder text if this is first response
+            if (apiResponseCount === 1) {
+                responseElement.innerHTML = '';
+            }
+            
+            const statusColor = status >= 200 && status < 300 ? '#10b981' : '#ef4444';
+            const responseHtml = `
+                <div style="border-bottom: 1px solid #374151; padding: 8px 0; margin-bottom: 8px;">
+                    <div style="color: ${statusColor}; font-weight: bold;">[${timestamp}] Status: ${status}</div>
+                    ${error ? 
+                        `<div style="color: #ef4444; margin-top: 4px; padding-left: 12px;">Error: ${error}</div>` :
+                        `<div style="color: #e5e7eb; margin-top: 4px; padding-left: 12px;">${JSON.stringify(data, null, 2)}</div>`
+                    }
+                </div>
+            `;
+            
+            responseElement.innerHTML += responseHtml;
+            
+            if (document.getElementById('autoScroll').checked) {
+                responseElement.scrollTop = responseElement.scrollHeight;
+            }
+        }
+        
+        function clearApiLogs() {
+            document.getElementById('liveRequests').innerHTML = '<div style="color: #9ca3af; font-style: italic;">Logs cleared - new requests will appear here</div>';
+            document.getElementById('liveResponses').innerHTML = '<div style="color: #9ca3af; font-style: italic;">Logs cleared - new responses will appear here</div>';
+            apiRequestCount = 0;
+            apiResponseCount = 0;
+        }
+        
+        // Monitor iframe messages for API activity
+        function monitorIframeActivity() {
+            const originalPostMessage = window.addEventListener;
+            
+            // Listen for postMessages from the iframe
+            window.addEventListener('message', function(event) {
+                if (event.origin !== window.location.origin && event.origin !== 'http://localhost:3000') return;
+                
+                const timestamp = new Date().toLocaleTimeString();
+                
+                // Log postMessage communication
+                if (event.data && event.data.type) {
+                    logApiResponse(200, {
+                        type: 'PostMessage',
+                        messageType: event.data.type,
+                        data: event.data
+                    });
+                }
+            });
+        }
+        
+        // Intercept fetch requests to monitor API calls
+        function interceptFetchRequests() {
+            const originalFetch = window.fetch;
+            
+            window.fetch = function(url, options = {}) {
+                const method = options.method || 'GET';
+                const requestData = options.body ? JSON.parse(options.body) : null;
+                
+                logApiRequest(method, url, requestData);
+                
+                return originalFetch(url, options)
+                    .then(response => {
+                        // Clone response to read it without consuming the original
+                        const responseClone = response.clone();
+                        
+                        responseClone.json()
+                            .then(data => {
+                                logApiResponse(response.status, data);
+                            })
+                            .catch(() => {
+                                // If not JSON, log as text
+                                responseClone.text().then(text => {
+                                    logApiResponse(response.status, { responseText: text });
+                                });
+                            });
+                        
+                        return response;
+                    })
+                    .catch(error => {
+                        logApiResponse(0, null, error.message);
+                        throw error;
+                    });
+            };
+        }
+        
+        // Add event listeners for form changes
+        function setupFormListeners() {
+            const formElements = [
+                'frontendBase',
+                'demoIdType', 
+                'testModeSelect',
+                'successWebhook',
+                'cancelWebhook'
+            ];
+            
+            formElements.forEach(elementId => {
+                const element = document.getElementById(elementId);
+                if (element) {
+                    // Add event listeners for real-time updates
+                    element.addEventListener('input', () => updateDynamicPayload(false));
+                    element.addEventListener('change', () => updateDynamicPayload(false));
+                    element.addEventListener('keyup', () => updateDynamicPayload(false));
+                    element.addEventListener('paste', () => {
+                        // Small delay for paste events to register
+                        setTimeout(() => updateDynamicPayload(false), 10);
+                    });
+                }
+            });
+        }
+        
+        // Initialize demo tab as active on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            showTab('demo');
+            monitorIframeActivity();
+            interceptFetchRequests();
+            setupFormListeners();
+            
+            // Show default payload immediately
+            updateDynamicPayload(true);
+            
+            // Log initial demo setup
+            setTimeout(() => {
+                logApiRequest('GET', '/embed-demo.html', null);
+                logApiResponse(200, { message: 'Demo page loaded successfully', defaultPayload: getDefaultPayload() });
+            }, 500);
+        });
+    </script>
 </body>
 
 </html>

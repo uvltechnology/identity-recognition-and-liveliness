@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Mode Demo</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .demo-section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 4px; }
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; margin: 5px; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .danger { background: #dc3545; }
+        .danger:hover { background: #c82333; }
+        .success { background: #28a745; }
+        .success:hover { background: #218838; }
+        .info { background: #e7f3ff; border: 1px solid #b3d9ff; padding: 15px; border-radius: 4px; margin: 15px 0; }
+        .warning { background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 4px; margin: 15px 0; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; }
+        code { background: #f8f9fa; padding: 2px 4px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Test Mode Demo - Identity Verification System</h1>
+        
+        <div class="info">
+            <strong>What is Test Mode?</strong><br>
+            Test mode is a boolean parameter (<code>testMode: true/false</code>) that can be passed in the payload when creating a verification session. When enabled, it provides additional debugging information and visual indicators to help developers integrate and troubleshoot the identity verification system.
+        </div>
+
+        <div class="demo-section">
+            <h3>📝 API Usage</h3>
+            <p>Include <code>testMode</code> in your session creation payload:</p>
+            <pre><code>// Camera Mode (Production)
+fetch('/verify/create-session', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    origin: 'https://your-domain.com',
+    idType: 'national-id',
+    testMode: false,      // Normal camera interface
+    successUrl: 'https://your-domain.com/success'
+  })
+})
+
+// Test Mode (Authorization Only)
+fetch('/verify/create-session', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    origin: 'https://your-domain.com',
+    idType: 'national-id',
+    testMode: true,       // Authorization buttons only
+    successUrl: 'https://your-domain.com/success'
+  })
+})</code></pre>
+        </div>
+
+        <div class="demo-section">
+            <h3>🧪 Test Mode Features</h3>
+            <ul>
+                <li><strong>Authorization-Only Interface:</strong> Shows only authorization buttons instead of camera interface</li>
+                <li><strong>Button Options:</strong>
+                    <ul>
+                        <li>🔐 "Authorize & Proceed" - Simulates successful authorization with mock identity data</li>
+                        <li>❌ "Cancel Authorization" - Simulates cancelled authorization</li>
+                    </ul>
+                </li>
+                <li><strong>Mock Identity Data:</strong> When authorized, returns sample firstName, lastName, idNumber, birthDate</li>
+                <li><strong>Session Updates:</strong> Choice is recorded and sent to parent application via postMessage</li>
+                <li><strong>Visual Indicators:</strong> Orange "🧪 TEST MODE" badge indicates test environment</li>
+                <li><strong>Enhanced Logging:</strong> Detailed console logs with 🧪 prefix</li>
+                <li><strong>Result Messaging:</strong> Sends test_auth_complete message to parent window</li>
+            </ul>
+        </div>
+
+        <div class="demo-section">
+            <h3>� Mode Comparison</h3>
+            <table style="width: 100%; border-collapse: collapse; margin: 1rem 0;">
+                <thead>
+                    <tr style="background: #f8f9fa;">
+                        <th style="padding: 0.75rem; border: 1px solid #dee2e6; text-align: left;">Feature</th>
+                        <th style="padding: 0.75rem; border: 1px solid #dee2e6; text-align: left;">Camera Mode</th>
+                        <th style="padding: 0.75rem; border: 1px solid #dee2e6; text-align: left;">Test Mode</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6; font-weight: 600;">Interface</td>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6;">Full camera, OCR, document capture</td>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6;">Authorization buttons only</td>
+                    </tr>
+                    <tr style="background: #f8f9fa;">
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6; font-weight: 600;">Data Source</td>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6;">Real OCR from ID document</td>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6;">Mock identity data</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6; font-weight: 600;">firstName</td>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6;">Extracted from document</td>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6;">"John" (if authorized)</td>
+                    </tr>
+                    <tr style="background: #f8f9fa;">
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6; font-weight: 600;">lastName</td>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6;">Extracted from document</td>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6;">"Doe" (if authorized)</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6; font-weight: 600;">idNumber</td>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6;">Extracted from document</td>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6;">"ID123456789" (if authorized)</td>
+                    </tr>
+                    <tr style="background: #f8f9fa;">
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6; font-weight: 600;">birthDate</td>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6;">Extracted from document</td>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6;">"1990-01-15" (if authorized)</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6; font-weight: 600;">Status</td>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6;">"done" (if fields extracted)</td>
+                        <td style="padding: 0.75rem; border: 1px solid #dee2e6;">"done" (if authorized) / "cancelled" (if cancelled)</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="demo-section">
+            <h3>�🔧 Test Embed URLs</h3>
+            <p>Create sessions with different modes:</p>
+            
+            <button onclick="createTestSession(false)">Create Camera Mode Session</button>
+            <button onclick="createTestSession(true)" class="success">Create Test Mode Session</button>
+            
+            <div id="session-result" style="margin-top: 15px;"></div>
+        </div>
+
+        <div class="demo-section">
+            <h3>📊 Console Output Examples</h3>
+            <p>When test mode is enabled, you'll see authorization logging with mock data:</p>
+            <pre><code>🧪 [TEST MODE] Authorization choice: Authorized
+🧪 [TEST MODE] Sent result to parent: {
+  identityOCR: {
+    action: "test_auth_complete",
+    authorized: true,
+    result: {
+      testMode: true,
+      authorized: true,
+      timestamp: "2025-10-24T10:30:00.000Z",
+      sessionId: "sess_abc123",
+      fields: {
+        firstName: "John",
+        lastName: "Doe", 
+        idNumber: "ID123456789",
+        birthDate: "1990-01-15",
+        confidence: "high"
+      },
+      rawText: "REPUBLIC OF THE PHILIPPINES\nDRIVER'S LICENSE\n..."
+    },
+    session: "sess_abc123"
+  }
+}
+🧪 [TEST MODE] Session updated: { success: true }</code></pre>
+        </div>
+
+        <div class="warning">
+            <strong>⚠️ Production Usage:</strong><br>
+            Always use <strong>Camera Mode</strong> (<code>testMode: false</code>) in production environments. <strong>Test Mode</strong> is intended only for development and integration testing purposes.
+        </div>
+
+        <div style="text-align: center; margin-top: 20px;">
+            <button onclick="window.location.href='/'">Back to Main App</button>
+            <button onclick="window.location.href='/test-rotation.html'">Rotation Test</button>
+        </div>
+    </div>
+
+    <script>
+        async function createTestSession(testMode) {
+            const resultDiv = document.getElementById('session-result');
+            resultDiv.innerHTML = '<p>Creating session...</p>';
+            
+            try {
+                const payload = {
+                    origin: window.location.origin,
+                    idType: 'national-id',
+                    testMode: testMode
+                };
+                
+                const response = await fetch('/verify/create-session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.success && result.data.wrapperUrl) {
+                    const mode = testMode ? 'Test Mode' : 'Camera Mode';
+                    const badgeClass = testMode ? 'success' : '';
+                    
+                    resultDiv.innerHTML = `
+                        <div class="info">
+                            <strong>✅ Session Created Successfully (${mode})</strong><br>
+                            <strong>Session ID:</strong> <code>${result.data.sessionId}</code><br>
+                            <strong>Mode:</strong> <code>${mode}</code><br><br>
+                            <button onclick="window.open('${result.data.wrapperUrl}', '_blank')" class="${badgeClass}">
+                                Open Embed (${mode})
+                            </button>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = '<p style="color: red;">❌ Failed to create session</p>';
+                }
+            } catch (error) {
+                console.error('Error creating session:', error);
+                resultDiv.innerHTML = `<p style="color: red;">❌ Error: ${error.message}</p>`;
+            }
+        }
+
+        // Show current test mode status if we're in an embed
+        document.addEventListener('DOMContentLoaded', () => {
+            if (window.__IDENTITY_TEST_MODE__ !== undefined) {
+                const statusDiv = document.createElement('div');
+                statusDiv.className = 'info';
+                statusDiv.innerHTML = `
+                    <strong>Current Session Test Mode:</strong> <code>${window.__IDENTITY_TEST_MODE__}</code>
+                `;
+                document.querySelector('.container').insertBefore(statusDiv, document.querySelector('.container').firstElementChild.nextSibling);
+            }
+        });
+    </script>
+</body>
+</html>
