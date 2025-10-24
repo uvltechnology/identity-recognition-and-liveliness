@@ -8,25 +8,23 @@ import OCRService from './services/ocrService.js';
 import { extractIdentityFromText } from './services/identityExtractor.js';
 import { extractFieldsUsingOpenAI } from './services/openaiExtractor.js';
 
-// Optional Redis client (used if REDIS_URL or IDENTITY_REDIS_URL env var is set)
-let redisClient = null;
-let useRedis = false;
+import sessionStore from './sessionStore.js';
+import storageModule from './storage.js';
+
+const { getSession, setSession, deleteSession, makeSessionId, cleanupTempForSession, initRedisClient } = sessionStore;
+const { uploadImageToStorage, deleteImageFromStorage, getImageUrlFromRef } = storageModule;
+
+// Initialize redis client if configured (dynamic import inside sessionStore init)
 (async () => {
   try {
     const redisModule = await import('redis');
     const { createClient } = redisModule;
     const redisUrl = process.env.REDIS_URL || process.env.IDENTITY_REDIS_URL || '';
     if (redisUrl) {
-      redisClient = createClient({ url: redisUrl });
-      redisClient.on('error', (err) => console.error('Redis client error', err));
-      await redisClient.connect();
-      useRedis = true;
-      console.log('[identity] Connected to Redis at', redisUrl);
+      await initRedisClient(createClient, redisUrl);
     }
   } catch (e) {
-    console.warn('[identity] Redis not configured or not available; using in-memory sessions');
-    redisClient = null;
-    useRedis = false;
+    // sessionStore will fall back to in-memory behavior; already logged there
   }
 })();
 
@@ -40,10 +38,8 @@ const ocrService = new OCRService();
 async function safePostWebhook(url, body) {
   if (!url) return;
   try {
-    // Fire-and-forget but attempt the request and log failures
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const signal = controller ? controller.signal : undefined;
-    // timeout after 6s to avoid hanging
     if (controller) setTimeout(() => controller.abort(), 6000);
     await fetch(String(url), {
       method: 'POST',
@@ -55,143 +51,6 @@ async function safePostWebhook(url, body) {
   } catch (e) {
     console.warn('[identity] webhook POST failed', url, e && e.message ? e.message : e);
   }
-}
-
-// Storage helpers: upload image buffer to S3 (if configured) or local public folder
-let s3Client = null;
-let s3Bucket = process.env.AWS_S3_BUCKET || process.env.IDENTITY_S3_BUCKET || '';
-async function uploadImageToStorage(base64Data, sid) {
-  const buffer = Buffer.from(base64Data, 'base64');
-  const filename = `identity_${sid}_${Date.now()}.jpg`;
-  // Prefer S3 if bucket configured
-  if (s3Bucket) {
-    try {
-      // dynamic import so package is optional
-      const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
-      if (!s3Client) {
-        s3Client = new S3Client({ region: process.env.AWS_REGION || process.env.IDENTITY_S3_REGION || 'us-east-1' });
-      }
-      const key = `temp/${sid}/${filename}`;
-      const cmd = new PutObjectCommand({ Bucket: s3Bucket, Key: key, Body: buffer, ContentType: 'image/jpeg' });
-      await s3Client.send(cmd);
-      // store reference as { type: 's3', key }
-      return { type: 's3', key };
-    } catch (e) {
-      console.warn('[identity] S3 upload failed, falling back to local storage', e && e.message ? e.message : e);
-    }
-  }
-
-  // Fallback: write into public/temp_uploads so it's served by this server's static middleware
-  try {
-    const publicDir = path.join(__dirname, '../public');
-    const uploadsDir = path.join(publicDir, 'temp_uploads');
-    await fs.mkdir(uploadsDir, { recursive: true });
-    const outPath = path.join(uploadsDir, filename);
-    await fs.writeFile(outPath, buffer);
-    const url = `/temp_uploads/${filename}`; // relative URL served by express.static
-    return { type: 'local', url };
-  } catch (e) {
-    console.warn('[identity] local image write failed', e && e.message ? e.message : e);
-    return null;
-  }
-}
-
-async function deleteImageFromStorage(ref) {
-  if (!ref) return;
-  try {
-    if (ref.type === 's3' && ref.key && s3Bucket) {
-      try {
-        const { S3Client, DeleteObjectCommand } = await import('@aws-sdk/client-s3');
-        if (!s3Client) s3Client = new S3Client({ region: process.env.AWS_REGION || process.env.IDENTITY_S3_REGION || 'us-east-1' });
-        const cmd = new DeleteObjectCommand({ Bucket: s3Bucket, Key: ref.key });
-        await s3Client.send(cmd);
-      } catch (e) { console.warn('[identity] S3 delete failed', e && e.message ? e.message : e); }
-    }
-    if (ref.type === 'local' && ref.url) {
-      try {
-        const publicDir = path.join(__dirname, '../public');
-        const filePath = path.join(publicDir, ref.url.replace(/^\//, ''));
-        await fs.unlink(filePath).catch(()=>{});
-      } catch (e) { /* ignore */ }
-    }
-  } catch (e) { /* ignore */ }
-}
-
-// In-memory verification sessions store (simple; for production use persistent store)
-const verifySessions = new Map();
-
-// Storage helpers: get/set/delete session either from Redis or in-memory Map
-async function getSession(id) {
-  if (!id) return null;
-  if (useRedis && redisClient) {
-    try {
-      const raw = await redisClient.get(`verify:${id}`);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) {
-      console.error('Redis getSession error', e);
-      return verifySessions.get(id) || null;
-    }
-  }
-  const s = verifySessions.get(id) || null;
-  if (!s) return null;
-  // in-memory TTL handling: if expired, remove and return null
-  if (s.expiresAt && Number(s.expiresAt) > 0 && Date.now() > Number(s.expiresAt)) {
-    try { verifySessions.delete(id); } catch (e) { /* ignore */ }
-    return null;
-  }
-  return s;
-}
-
-async function setSession(id, sessionObj, ttlSeconds = 60 * 60) {
-  if (!id) return;
-  if (useRedis && redisClient) {
-    try {
-      await redisClient.set(`verify:${id}`, JSON.stringify(sessionObj), { EX: ttlSeconds });
-      return;
-    } catch (e) {
-      console.error('Redis setSession error', e);
-      verifySessions.set(id, sessionObj);
-      return;
-    }
-  }
-  // store with expiresAt so in-memory sessions have TTL semantics
-  try {
-    const copy = { ...(sessionObj || {}) };
-    copy.expiresAt = Date.now() + Number(ttlSeconds) * 1000;
-    verifySessions.set(id, copy);
-  } catch (e) {
-    verifySessions.set(id, sessionObj);
-  }
-}
-
-async function deleteSession(id) {
-  if (!id) return;
-  if (useRedis && redisClient) {
-    try { await redisClient.del(`verify:${id}`); return; } catch (e) { console.error('Redis deleteSession error', e); }
-  }
-  verifySessions.delete(id);
-}
-
-// Periodic cleanup for expired in-memory sessions (when Redis is not used)
-if (!useRedis) {
-  setInterval(() => {
-    try {
-      const now = Date.now();
-      for (const [k, v] of verifySessions.entries()) {
-        if (!v) continue;
-        if (v.expiresAt && Number(v.expiresAt) > 0 && now > Number(v.expiresAt)) {
-          try { verifySessions.delete(k); } catch (e) { /* ignore */ }
-        }
-      }
-    } catch (e) {
-      // no-op
-    }
-  }, 60 * 1000);
-}
-
-function makeSessionId() {
-  try { return (globalThis.crypto && crypto.randomUUID) ? crypto.randomUUID() : `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`; }
-  catch(e) { return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`; }
 }
 
 // Configure multer for handling image uploads
@@ -345,6 +204,7 @@ async function createVerifySessionHandler(req, res) {
     const adminPath = `/admin/qrcustomer?verify_session=${encodeURIComponent(sessionId)}`;
     const directAdminUrl = frontendBase ? `${frontendBase}${adminPath}` : adminPath;
 
+    console.log("Create a identity verification session id type:", payload.idType || 'not specified', "origin:", payload.origin || req.get('origin') || 'unknown');
     res.json({ success: true, sessionId, wrapperUrl, directAdminUrl, iframeUrl });
   } catch (e) {
     console.error('Create verify session error', e);
@@ -569,11 +429,11 @@ app.get('/embed/session/:id', async (req, res) => {
       </head>
       <body class="bg-gray-50 text-gray-900">
         <div class="app-container min-h-screen">
-          <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+          <main class="mx-auto max-w-7xl">
             <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <!-- Left: Camera + Controls (copied from index.html for consistent design) -->
               <div class="camera-section space-y-4">
-                <div class="camera-container relative overflow-hidden rounded-xl border border-gray-200 bg-black shadow-sm">
+                <div class="camera-container relative overflow-hidden bg-black shadow-sm">
                   <video id="video" autoplay muted playsinline class="h-64 w-full object-cover sm:h-72 md:h-80 lg:h-[26rem]"></video>
                   <canvas id="canvas" style="display: none;"></canvas>
                   <!-- Hidden preview image for embed mode (off-screen) to keep capture flow robust when UI elements are removed -->
@@ -582,7 +442,7 @@ app.get('/embed/session/:id', async (req, res) => {
                   <!-- Rectangle guide overlay -->
                   <div class="overlay-container pointer-events-none absolute inset-0 flex items-center justify-center">
                     <div class="guide-rectangle rounded-xl border-2 border-dashed border-white/70" style="width:80%; height:60%;"></div>
-                    <div id="alignment-feedback" class="alignment-feedback absolute left-1/2 bottom-3 w-[94%] -translate-x-1/2 rounded-lg">
+                    <div id="alignment-feedback" class="alignment-feedback absolute left-1/2 bottom-1/4 w-[94%] -translate-x-1/2 rounded-lg">
                       <div class="feedback-message text-center text-xs font-semibold tracking-wide text-white sm:text-sm">Center your document</div>
                     </div>
                   </div>
@@ -728,7 +588,7 @@ async function postSessionResultHandler(req, res) {
       }
       // If terminal, cleanup temporary storage (best-effort)
       if (['done', 'completed', 'success', 'cancelled', 'canceled', 'failed'].includes(status)) {
-        try { await cleanupTempForSession(id); } catch (e) { /* ignore */ }
+        try { await cleanupTempForSession(id, { deleteImageFromStorage }); } catch (e) { /* ignore */ }
       }
     } catch (e) {
       console.warn('[identity] webhook dispatch error', e && e.message ? e.message : e);
@@ -767,25 +627,11 @@ app.get('/api/verify/session/:id/temp', async (req, res) => {
       }
     }
 
-    // If imageRef is S3, generate presigned URL if possible
-    let imageUrl = null;
-    try {
-      if (imageRef && imageRef.type === 's3' && imageRef.key && s3Bucket) {
+        // Resolve image URL (S3 presign or local URL) via storage helper
+        let imageUrl = null;
         try {
-          const { GetObjectCommand } = await import('@aws-sdk/client-s3');
-          const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
-          if (!s3Client) {
-            const { S3Client } = await import('@aws-sdk/client-s3');
-            s3Client = new S3Client({ region: process.env.AWS_REGION || process.env.IDENTITY_S3_REGION || 'us-east-1' });
-          }
-          const cmd = new GetObjectCommand({ Bucket: s3Bucket, Key: imageRef.key });
-          imageUrl = await getSignedUrl(s3Client, cmd, { expiresIn: 3600 });
-        } catch (e) { console.warn('[identity] presign failed', e); }
-      }
-      if (!imageUrl && imageRef && imageRef.type === 'local' && imageRef.url) {
-        imageUrl = imageRef.url; // relative URL served by express.static
-      }
-    } catch (e) { /* ignore */ }
+          imageUrl = await getImageUrlFromRef(imageRef);
+        } catch (e) { /* ignore */ }
 
     return res.json({ success: true, imageRef, imageUrl, ocr });
   } catch (e) {
@@ -794,37 +640,7 @@ app.get('/api/verify/session/:id/temp', async (req, res) => {
   }
 });
 
-// Helper to remove temp keys after finalization
-async function cleanupTempForSession(id) {
-  if (!id) return;
-  try {
-    // If we have an image reference in redis, remove stored image
-    let imageRef = null;
-    if (useRedis && redisClient) {
-      try {
-        const raw = await redisClient.get(`verify:image_ref:${id}`);
-        imageRef = raw ? JSON.parse(raw) : null;
-        await redisClient.del(`verify:image_ref:${id}`);
-        await redisClient.del(`verify:ocr:${id}`);
-      } catch (e) { /* ignore */ }
-    }
-    // If no redis ref, check session payload
-    const sess = await getSession(id);
-    if (sess && sess.payload) {
-      try {
-        imageRef = imageRef || sess.payload.tempImageRef || null;
-        delete sess.payload.tempImageRef;
-        delete sess.payload.tempOcr;
-        await setSession(id, sess);
-      } catch (e) { /* ignore */ }
-    }
 
-    // Delete the actual stored image (S3 or local) if we have a reference
-    try {
-      if (imageRef) await deleteImageFromStorage(imageRef);
-    } catch (e) { /* ignore */ }
-  } catch (e) { /* ignore */ }
-}
 
 // Handle base64 image uploads
 app.post('/api/ocr/base64', async (req, res) => {
