@@ -605,7 +605,7 @@
                 <p>The Identity Verification service provides secure document scanning and data extraction capabilities through both camera-based and test modes.</p>
                 
                 <div class="info-card">
-                    <strong>Base URL:</strong> <span class="api-endpoint">http://localhost:3000</span>
+                    <strong>Base URL:</strong> <span class="api-endpoint">http://localhost:3001</span>
                 </div>
 
                 <h3 id="api-endpoints">Embed Integration</h3>
@@ -620,7 +620,7 @@
 
                 <div class="code-block">
 &lt;iframe 
-    src="http://localhost:3000/embed?testMode=false" 
+    src="http://localhost:3001/embed?testMode=false" 
     width="100%" 
     height="600"
     frameborder="0"&gt;
@@ -666,7 +666,7 @@
                 <div class="code-block">
 &lt;iframe 
     id="identity-frame"
-    src="http://localhost:3000/embed" 
+    src="http://localhost:3001/embed" 
     width="100%" 
     height="600"
     frameborder="0"&gt;
@@ -677,7 +677,7 @@
                 <p>Handle verification results using the postMessage API:</p>
                 <div class="code-block">
 window.addEventListener('message', function(event) {
-    if (event.origin !== 'http://localhost:3000') return;
+    if (event.origin !== 'http://localhost:3001') return;
     
     if (event.data.type === 'IDENTITY_VERIFIED') {
         const identityData = event.data.data;
@@ -696,7 +696,7 @@ window.addEventListener('message', function(event) {
                 
                 <div class="code-block">
 // Enable test mode
-const testModeUrl = 'http://localhost:3000/embed?testMode=true';
+const testModeUrl = 'http://localhost:3001/embed?testMode=true';
 document.getElementById('identity-frame').src = testModeUrl;
                 </div>
 
@@ -715,7 +715,7 @@ document.getElementById('identity-frame').src = testModeUrl;
                 <h3>5. Error Handling</h3>
                 <div class="code-block">
 window.addEventListener('message', function(event) {
-    if (event.origin !== 'http://localhost:3000') return;
+    if (event.origin !== 'http://localhost:3001') return;
     
     switch(event.data.type) {
         case 'IDENTITY_VERIFIED':
@@ -793,7 +793,7 @@ window.addEventListener('message', function(event) {
   <span style="color: #82aaff;">testMode</span> = <span style="color: #f78c6c;">false</span>,
   <span style="color: #82aaff;">sessionId</span>,
   <span style="color: #82aaff;">idType</span> = <span style="color: #c3e88d;">'national-id'</span>,
-  <span style="color: #82aaff;">baseUrl</span> = <span style="color: #c3e88d;">'http://localhost:3000'</span>,
+  <span style="color: #82aaff;">baseUrl</span> = <span style="color: #c3e88d;">'http://localhost:3001'</span>,
   <span style="color: #82aaff;">onResult</span>,
   <span style="color: #82aaff;">onError</span>,
   <span style="color: #82aaff;">onCancel</span>
@@ -959,7 +959,7 @@ window.addEventListener('message', function(event) {
 
 <span style="color: #c792ea;">export</span> <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">useIdentityVerification</span> = (<span style="color: #82aaff;">config</span>: <span style="color: #ffcb6b;">VerificationConfig</span> = {}) => {
   <span style="color: #c792ea;">const</span> {
-    <span style="color: #82aaff;">baseUrl</span> = <span style="color: #c3e88d;">'http://localhost:3000'</span>,
+    <span style="color: #82aaff;">baseUrl</span> = <span style="color: #c3e88d;">'http://localhost:3001'</span>,
     <span style="color: #82aaff;">testMode</span> = <span style="color: #f78c6c;">false</span>,
     <span style="color: #82aaff;">idType</span> = <span style="color: #c3e88d;">'national-id'</span>
   } = <span style="color: #82aaff;">config</span>;
@@ -1237,7 +1237,7 @@ window.addEventListener('message', function(event) {
 
   <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">handleMessage</span> = <span style="color: #82aaff;">useCallback</span>((<span style="color: #82aaff;">event</span>: <span style="color: #ffcb6b;">MessageEvent</span>) => {
     <span style="color: #7c7c7c;">// Security check - only accept messages from our domain</span>
-    <span style="color: #c792ea;">if</span> (<span style="color: #82aaff;">event</span>.<span style="color: #82aaff;">origin</span> !== <span style="color: #c3e88d;">'http://localhost:3000'</span>) <span style="color: #c792ea;">return</span>;
+    <span style="color: #c792ea;">if</span> (<span style="color: #82aaff;">event</span>.<span style="color: #82aaff;">origin</span> !== <span style="color: #c3e88d;">'http://localhost:3001'</span>) <span style="color: #c792ea;">return</span>;
     
     <span style="color: #c792ea;">const</span> { <span style="color: #82aaff;">type</span>, <span style="color: #82aaff;">data</span> } = <span style="color: #82aaff;">event</span>.<span style="color: #82aaff;">data</span>;
     
@@ -1266,7 +1266,7 @@ window.addEventListener('message', function(event) {
     <span style="color: #c792ea;">return</span> () => <span style="color: #82aaff;">window</span>.<span style="color: #82aaff;">removeEventListener</span>(<span style="color: #c3e88d;">'message'</span>, <span style="color: #82aaff;">handleMessage</span>);
   }, [<span style="color: #82aaff;">handleMessage</span>]);
 
-  <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">embedUrl</span> = <span style="color: #c792ea;">new</span> <span style="color: #ffcb6b;">URL</span>(<span style="color: #c3e88d;">'/embed'</span>, <span style="color: #c3e88d;">'http://localhost:3000'</span>);
+  <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">embedUrl</span> = <span style="color: #c792ea;">new</span> <span style="color: #ffcb6b;">URL</span>(<span style="color: #c3e88d;">'/embed'</span>, <span style="color: #c3e88d;">'http://localhost:3001'</span>);
   <span style="color: #82aaff;">embedUrl</span>.<span style="color: #82aaff;">searchParams</span>.<span style="color: #82aaff;">set</span>(<span style="color: #c3e88d;">'testMode'</span>, <span style="color: #82aaff;">testMode</span>.<span style="color: #82aaff;">toString</span>());
   <span style="color: #c792ea;">if</span> (<span style="color: #82aaff;">sessionId</span>) <span style="color: #82aaff;">embedUrl</span>.<span style="color: #82aaff;">searchParams</span>.<span style="color: #82aaff;">set</span>(<span style="color: #c3e88d;">'sessionId'</span>, <span style="color: #82aaff;">sessionId</span>);
 
@@ -1403,7 +1403,7 @@ window.addEventListener('message', function(event) {
 <span style="color: #7c7c7c;">// Props with defaults</span>
 <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">props</span> = <span style="color: #82aaff;">withDefaults</span>(<span style="color: #82aaff;">defineProps</span>&lt;<span style="color: #ffcb6b;">Props</span>&gt;(), {
   <span style="color: #82aaff;">testMode</span>: <span style="color: #f78c6c;">false</span>,
-  <span style="color: #82aaff;">baseUrl</span>: <span style="color: #c3e88d;">'http://localhost:3000'</span>
+  <span style="color: #82aaff;">baseUrl</span>: <span style="color: #c3e88d;">'http://localhost:3001'</span>
 });
 
 <span style="color: #7c7c7c;">// Emits</span>
@@ -1588,7 +1588,7 @@ window.addEventListener('message', function(event) {
         <span style="color: #c792ea;">this</span>.<span style="color: #82aaff;">container</span> = <span style="color: #82aaff;">container</span>;
         <span style="color: #c792ea;">this</span>.<span style="color: #82aaff;">options</span> = {
             <span style="color: #82aaff;">testMode</span>: <span style="color: #f78c6c;">false</span>,
-            <span style="color: #82aaff;">baseUrl</span>: <span style="color: #c3e88d;">'http://localhost:3000'</span>,
+            <span style="color: #82aaff;">baseUrl</span>: <span style="color: #c3e88d;">'http://localhost:3001'</span>,
             <span style="color: #82aaff;">sessionId</span>: <span style="color: #f78c6c;">null</span>,
             <span style="color: #82aaff;">onResult</span>: () => {},
             <span style="color: #82aaff;">onError</span>: () => {},
@@ -1902,7 +1902,7 @@ window.addEventListener('message', function(event) {
 <span style="color: #7c7c7c;">// Security middleware</span>
 <span style="color: #82aaff;">app</span>.<span style="color: #82aaff;">use</span>(<span style="color: #82aaff;">helmet</span>());
 <span style="color: #82aaff;">app</span>.<span style="color: #82aaff;">use</span>(<span style="color: #82aaff;">cors</span>({
-    <span style="color: #82aaff;">origin</span>: [<span style="color: #c3e88d;">'http://localhost:3000'</span>, <span style="color: #c3e88d;">'https://yourapp.com'</span>],
+    <span style="color: #82aaff;">origin</span>: [<span style="color: #c3e88d;">'http://localhost:3001'</span>, <span style="color: #c3e88d;">'https://yourapp.com'</span>],
     <span style="color: #82aaff;">credentials</span>: <span style="color: #f78c6c;">true</span>
 }));
 
@@ -2053,7 +2053,7 @@ window.addEventListener('message', function(event) {
         <span style="color: #c792ea;">await</span> <span style="color: #82aaff;">verification</span>.<span style="color: #82aaff;">save</span>();
 
         <span style="color: #7c7c7c;">// Generate embed URL</span>
-        <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">embedUrl</span> = <span style="color: #c3e88d;">`http://localhost:3000/embed?sessionId=${<span style="color: #82aaff;">sessionId</span>}&testMode=${<span style="color: #82aaff;">testMode</span>}`</span>;
+        <span style="color: #c792ea;">const</span> <span style="color: #82aaff;">embedUrl</span> = <span style="color: #c3e88d;">`http://localhost:3001/embed?sessionId=${<span style="color: #82aaff;">sessionId</span>}&testMode=${<span style="color: #82aaff;">testMode</span>}`</span>;
 
         <span style="color: #82aaff;">res</span>.<span style="color: #82aaff;">json</span>({
             <span style="color: #82aaff;">success</span>: <span style="color: #f78c6c;">true</span>,
@@ -2196,7 +2196,7 @@ window.addEventListener('message', function(event) {
                 
                 &lt;div class="iframe-container"&gt;
                     &lt;iframe 
-                        src="http://localhost:3000/embed?testMode=${<span style="color: #82aaff;">testMode</span>}" 
+                        src="http://localhost:3001/embed?testMode=${<span style="color: #82aaff;">testMode</span>}" 
                         width="100%" 
                         height="600"
                         frameborder="0"
@@ -2209,7 +2209,7 @@ window.addEventListener('message', function(event) {
             &lt;script&gt;
                 // Listen for verification results
                 window.addEventListener('message', function(event) {
-                    if (event.origin !== 'http://localhost:3000') return;
+                    if (event.origin !== 'http://localhost:3001') return;
                     
                     const status = document.getElementById('status');
                     
@@ -2764,7 +2764,7 @@ window.addEventListener('message', function(event) {
             
             // Listen for postMessages from the iframe
             window.addEventListener('message', function(event) {
-                if (event.origin !== window.location.origin && event.origin !== 'http://localhost:3000') return;
+                if (event.origin !== window.location.origin && event.origin !== 'http://localhost:3001') return;
                 
                 const timestamp = new Date().toLocaleTimeString();
                 

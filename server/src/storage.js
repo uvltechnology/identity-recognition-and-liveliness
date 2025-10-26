@@ -66,6 +66,11 @@ export async function getImageUrlFromRef(imageRef) {
   if (!imageRef) return null;
   let imageUrl = null;
   try {
+    // Handle sample image type for test mode
+    if (imageRef && imageRef.type === 'sample') {
+      return imageRef.url || '/image/sample-id-john-doe.png';
+    }
+    
     if (imageRef && imageRef.type === 's3' && imageRef.key && s3Bucket) {
       try {
         const { GetObjectCommand } = await import('@aws-sdk/client-s3');

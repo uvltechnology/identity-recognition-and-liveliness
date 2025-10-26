@@ -92,7 +92,9 @@ class OCRProcessor {
 
     async processImageData(imageDataUrl) {
         const ocrType = this.ocrTypeSelect.value;
-        
+        // keep the last processed data URL so embed/camera flows can include the inline image without requiring server storage
+        try { this.lastImageDataUrl = imageDataUrl; } catch (e) { /* ignore */ }
+
         const requestData = {
             image: imageDataUrl,
             type: ocrType
@@ -211,7 +213,7 @@ class OCRProcessor {
         }
     }
 
-    displayIdentityResults(container, result) {
+    async displayIdentityResults(container, result) {
         const applyNationalIdRules = this.isNationalIdSelected();
         const applyPassportRules = this.isPassportSelected();
         // UMID condition: flips true only when the "ID Type" dropdown (#id-type) value is 'umid'
@@ -273,7 +275,51 @@ class OCRProcessor {
                     // Notify parent window (if embed) with a close action
                     try {
                         if (window.parent && window.parent !== window) {
-                            const payload = { success: true, type: 'identity', session: window.__IDENTITY_SESSION__ || null, fields: result.fields, action: 'close' };
+                            // Fetch the captured image info (including data URL when available) from session temp endpoint
+                            const sid = window.__IDENTITY_SESSION__ || null;
+                            let capturedImageUrl = null;
+                            let capturedImageData = null;
+
+                            if (sid) {
+                                try {
+                                    const tempResponse = await fetch(`/api/verify/session/${encodeURIComponent(sid)}/temp`);
+                                    if (tempResponse.ok) {
+                                        const tempData = await tempResponse.json();
+                                        capturedImageUrl = tempData.imageUrl || null;
+                                        capturedImageData = tempData.imageData || null; // data URL (base64) when available
+                                    }
+                                } catch (e) {
+                                    console.warn('Failed to fetch captured image info', e);
+                                }
+                            }
+
+                            // If we have a local last processed image (camera flow), prefer that inline data URL
+                            try {
+                                if (!capturedImageData && this.lastImageDataUrl) {
+                                    capturedImageData = this.lastImageDataUrl;
+                                }
+                            } catch (e) { /* ignore */ }
+
+                            // Ensure the captured image data (when available) is present in the result fields
+                            try {
+                                if (capturedImageData) {
+                                    result.fields = result.fields || {};
+                                    // canonical field name: captureidimagebase64 (base64 data URL)
+                                    result.fields.captureidimagebase64 = capturedImageData;
+                                }
+                            } catch (e) { /* ignore */ }
+
+                            const payload = {
+                                success: true,
+                                type: 'identity',
+                                session: window.__IDENTITY_SESSION__ || null,
+                                fields: result.fields,
+                                action: 'close',
+                                capturedImageUrl: capturedImageUrl,
+                                capturedImageData: capturedImageData, // inline file as data URL (if available)
+                                data: result.fields,
+                                rawText: result.rawText || null
+                            };
                             const target = (typeof window.__IDENTITY_EXPECTED_ORIGIN__ === 'string' && window.__IDENTITY_EXPECTED_ORIGIN__) ? window.__IDENTITY_EXPECTED_ORIGIN__ : '*';
                             try { window.parent.postMessage({ identityOCR: payload }, target); }
                             catch (e) { try { window.parent.postMessage({ identityOCR: payload }, '*'); } catch (e2) { console.warn('postMessage failed', e2); } }

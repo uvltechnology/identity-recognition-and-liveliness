@@ -446,7 +446,7 @@ app.get('/embed/session/:id', async (req, res) => {
               window.close();
             }
 
-            function handleAuthorize(authorized) {
+            async function handleAuthorize(authorized) {
               console.log('🧪 [TEST MODE] Authorization choice:', authorized ? 'Authorized' : 'Skipped');
               
               // Create result payload with mock identity data if authorized
@@ -458,9 +458,8 @@ app.get('/embed/session/:id', async (req, res) => {
                 sessionId: window.__IDENTITY_SESSION__
               };
 
-              // Add mock identity fields if authorized
+              // Add mock identity fields and sample image if authorized
               if (authorized) {
-                
                 result.fields = {
                   firstName: 'John',
                   lastName: 'Doe',
@@ -470,17 +469,59 @@ app.get('/embed/session/:id', async (req, res) => {
                   phone_number: '0912 345 6789',
                   id_type: window.__IDENTITY_REQUESTED_ID_TYPE__
                 };
+                // Attempt to inline the sample image as a base64 data URL so the iframe response contains the file inline
+                try {
+                  const origin = window.location.origin;
+                  result.capturedImageUrl = \`\${origin}/image/sample-id-john-doe.png\`;
+                  result.imageRef = {
+                    type: 'sample',
+                    url: \`\${origin}/image/sample-id-john-doe.png\`,
+                    filename: 'sample-id-john-doe.png'
+                  };
+
+                  // Fetch the sample image and convert to data URL (do NOT store/upload anything)
+                  try {
+                    const resp = await fetch(result.capturedImageUrl, { cache: 'no-store' });
+                    if (resp && resp.ok) {
+                      const blob = await resp.blob();
+                      const reader = new FileReader();
+                      const dataUrl = await new Promise((resolve, reject) => {
+                        reader.onloadend = () => resolve(reader.result);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(blob);
+                      });
+                      result.fields = result.fields || {};
+                      result.fields.captureidimagebase64 = dataUrl;
+                    }
+                  } catch (e) {
+                    console.warn('[TEST MODE] failed to inline sample image as base64', e);
+                  }
+                } catch (e) {
+                  /* ignore */
+                }
                 result.rawText = 'REPUBLIC OF THE PHILIPPINES\\nDRIVER\\'S LICENSE\\nLAST NAME: DOE\\nFIRST NAME: JOHN\\nID NO: ID123456789\\nBIRTH DATE: 01/15/1990\\nTEST MODE SAMPLE DATA';
+                
+                // Add sample image URL for test mode
+                const origin = window.location.origin;
+                result.capturedImageUrl = \`\${origin}/image/sample-id-john-doe.png\`;
+                result.imageRef = {
+                  type: 'sample',
+                  url: \`\${origin}/image/sample-id-john-doe.png\`,
+                  filename: 'sample-id-john-doe.png'
+                };
               }
 
-              // Notify parent window if embedded
+              // Notify parent window if embedded - include both data and image URL
               if (window.parent && window.parent !== window) {
                 const message = {
                   identityOCR: {
                     action: 'test_auth_complete',
                     authorized: authorized,
                     result: result,
-                    session: window.__IDENTITY_SESSION__
+                    session: window.__IDENTITY_SESSION__,
+                    data: result.fields || null,
+                    capturedImageUrl: result.capturedImageUrl || null,
+                    rawText: result.rawText || null
                   }
                 };
                 
@@ -836,19 +877,91 @@ async function postSessionResultHandler(req, res) {
     const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 60 * 60);
     await setSession(id, updated, ttl);
 
+    // Attempt to enrich payload with temporary captured image (if any)
+    let imageRef = null;
+    let imageUrl = null;
+    let imageData = null;
+    let tempOcr = null;
+    try {
+      if (useRedis && redisClient) {
+        try {
+          const rawRef = await redisClient.get(`verify:image_ref:${id}`);
+          imageRef = rawRef ? JSON.parse(rawRef) : null;
+          const rawOcr = await redisClient.get(`verify:ocr:${id}`);
+          tempOcr = rawOcr ? JSON.parse(rawOcr) : null;
+        } catch (e) { console.warn('[identity] redis read temp failed', e); }
+      }
+      if (!imageRef) {
+        imageRef = (existing.payload && existing.payload.tempImageRef) ? existing.payload.tempImageRef : null;
+        tempOcr = tempOcr || ((existing.payload && existing.payload.tempOcr) ? existing.payload.tempOcr : null);
+      }
+
+      // If no captured image but session is in testMode, provide a sample image for review
+      if (!imageRef && existing.payload && existing.payload.testMode) {
+        try {
+          const origin = req.protocol + '://' + req.get('host');
+          imageRef = {
+            type: 'sample',
+            url: `${origin}/image/sample-id-john-doe.png`,
+            filename: 'sample-id-john-doe.png'
+          };
+        } catch (e) { /* ignore */ }
+      }
+
+      if (imageRef) {
+        try { imageUrl = await getImageUrlFromRef(imageRef); } catch (e) { /* ignore */ }
+
+        // If image is local/sample, attempt to load inline data URL (useful for demo/review)
+        try {
+          if (imageRef && imageRef.url && (imageRef.type === 'local' || imageRef.type === 'sample')) {
+            const publicDir = path.join(__dirname, '../public');
+            const rel = String(imageRef.url || '').replace(/^\//, '');
+            const filePath = path.join(publicDir, rel);
+            const b = await fs.readFile(filePath);
+            const ext = path.extname(filePath).toLowerCase();
+            let mime = 'application/octet-stream';
+            if (ext === '.png') mime = 'image/png';
+            else if (ext === '.jpg' || ext === '.jpeg') mime = 'image/jpeg';
+            else if (ext === '.webp') mime = 'image/webp';
+            imageData = `data:${mime};base64,${b.toString('base64')}`;
+          }
+        } catch (e) {
+          console.warn('[identity] failed to read image file for session temp', e && e.message ? e.message : e);
+        }
+      }
+    } catch (e) {
+      console.warn('[identity] temp image enrichment failed', e && e.message ? e.message : e);
+    }
+
+    // Attach discovered image info into session payload for downstream consumers
+    try {
+      const payloadUpd = { ...(updated.payload || {}) };
+      if (imageRef) payloadUpd.tempImageRef = imageRef;
+      if (tempOcr) payloadUpd.tempOcr = tempOcr;
+      updated.payload = payloadUpd;
+      await setSession(id, updated, ttl);
+    } catch (e) { /* ignore */ }
+
     // Fire webhooks for terminal states (best-effort)
     try {
       const s = updated || {};
       const p = s.payload || {};
       const status = (s.status || '').toLowerCase();
       const result = s.result || null;
+
+      // Build webhook payload and include image info when available
+      const webhookPayload = { sessionId: id, status: s.status, result };
+      if (imageRef) webhookPayload.imageRef = imageRef;
+      if (imageUrl) webhookPayload.imageUrl = imageUrl;
+      if (imageData) webhookPayload.imageData = imageData;
+
       if (['done', 'completed', 'success'].includes(status) && p.successWebhook) {
-        // send minimal payload
-        safePostWebhook(p.successWebhook, { sessionId: id, status: s.status, result });
+        safePostWebhook(p.successWebhook, webhookPayload);
       }
       if (['cancelled', 'canceled', 'failed'].includes(status) && p.cancelWebhook) {
-        safePostWebhook(p.cancelWebhook, { sessionId: id, status: s.status, result });
+        safePostWebhook(p.cancelWebhook, webhookPayload);
       }
+
       // If terminal, cleanup temporary storage (best-effort)
       if (['done', 'completed', 'success', 'cancelled', 'canceled', 'failed'].includes(status)) {
         try { await cleanupTempForSession(id, { deleteImageFromStorage }); } catch (e) { /* ignore */ }
@@ -896,7 +1009,32 @@ app.get('/api/verify/session/:id/temp', async (req, res) => {
       imageUrl = await getImageUrlFromRef(imageRef);
     } catch (e) { /* ignore */ }
 
-    return res.json({ success: true, imageRef, imageUrl, ocr });
+    // Also attempt to include the actual image file data (data URL) for local/sample images
+    let imageData = null;
+    try {
+      if (imageRef && imageRef.url) {
+        // Only handle local or sample types from the public folder
+        if (imageRef.type === 'local' || imageRef.type === 'sample') {
+          try {
+            const publicDir = path.join(__dirname, '../public');
+            const rel = String(imageRef.url || '').replace(/^\//, '');
+            const filePath = path.join(publicDir, rel);
+            const b = await fs.readFile(filePath);
+            const ext = path.extname(filePath).toLowerCase();
+            let mime = 'application/octet-stream';
+            if (ext === '.png') mime = 'image/png';
+            else if (ext === '.jpg' || ext === '.jpeg') mime = 'image/jpeg';
+            else if (ext === '.webp') mime = 'image/webp';
+            imageData = `data:${mime};base64,${b.toString('base64')}`;
+          } catch (e) {
+            // best-effort: if reading fails, leave imageData null
+            console.warn('[identity] failed to read image file for session temp', e && e.message ? e.message : e);
+          }
+        }
+      }
+    } catch (e) { /* ignore */ }
+
+    return res.json({ success: true, imageRef, imageUrl, imageData, ocr });
   } catch (e) {
     console.error('get temp session data error', e);
     return res.status(500).json({ success: false, error: 'Failed to read temp session data' });
@@ -968,11 +1106,27 @@ app.post('/api/ocr/base64', async (req, res) => {
           const sid = String(req.body.sessionId || req.query.sessionId || '');
           if (sid) {
             const ttlSeconds = Number(process.env.VERIFY_SESSION_TTL_SECONDS || 60 * 60);
+            
+            // Check if session is in test mode
+            const existingSession = await getSession(sid);
+            const isTestMode = existingSession && existingSession.payload && existingSession.payload.testMode === true;
+            
             // Store base64 image and OCR JSON in Redis if available, otherwise attach to in-memory session payload
             // Upload image to storage (S3 or local) and store reference in Redis/session
             let imageRef = null;
             try {
-              imageRef = await uploadImageToStorage(base64Data, sid);
+              if (isTestMode) {
+                // In test mode, use sample image instead of uploading actual captured image
+                const origin = req.protocol + '://' + req.get('host');
+                imageRef = {
+                  type: 'sample',
+                  url: `${origin}/image/sample-id-john-doe.png`,
+                  filename: 'sample-id-john-doe.png'
+                };
+                console.info('[identity] Using sample image for test mode session', sid);
+              } else {
+                imageRef = await uploadImageToStorage(base64Data, sid);
+              }
             } catch (e) { console.warn('[identity] uploadImageToStorage failed', e); }
 
             // Log the OCR result server-side for debugging/audit
