@@ -557,7 +557,7 @@ class GeminiService {
       'Given noisy OCR text, return a single JSON object with these keys:',
       '{"firstName": string | null, "lastName": string | null, "birthDate": string | null, "idNumber": string | null, "confidence": number}',
       'Rules:',
-      "- idNumber must be formatted as either 'XXX-XXX-XXX' (9 digits) or 'XXX-XXX-XXX-XXX' (12 digits with branch), using only digits (X=0-9).",
+      "- idNumber should be the TIN number exactly as it appears. Common formats are 9 digits (XXX-XXX-XXX) or 12 digits (XXX-XXX-XXX-XXX), but accept any length.",
       "- Accept labels like 'TIN', 'Tax Identification Number', 'Taxpayer Identification Number'.",
       '- birthDate must be ISO date: YYYY-MM-DD if month/day are known; otherwise null.',
       "- Extract 'Surname' and 'First/Given Name(s)' when available.",
@@ -597,18 +597,22 @@ class GeminiService {
       };
       const normalizeTIN = (s) => {
         if (!s) return undefined;
-        const digits = String(s).replace(/[^0-9]/g, '');
-        if (digits.length >= 12) {
-          const d = digits.slice(0, 12);
-          return `${d.slice(0,3)}-${d.slice(3,6)}-${d.slice(6,9)}-${d.slice(9,12)}`;
+        // Accept whatever format AI returns; just clean up obvious separators and spacing
+        const str = String(s).trim();
+        // If already formatted, keep it
+        if (/^\d{3}-\d{3}-\d{3}(-\d+)?$/.test(str)) return str;
+        // Otherwise, return digits as-is without forcing length limits
+        const digits = str.replace(/[^0-9]/g, '');
+        if (!digits) return undefined;
+        // Format common patterns: 9 or 12+ digits
+        if (digits.length === 12) {
+          return `${digits.slice(0,3)}-${digits.slice(3,6)}-${digits.slice(6,9)}-${digits.slice(9,12)}`;
         }
-        if (digits.length >= 9) {
-          const d = digits.slice(0, 9);
-          return `${d.slice(0,3)}-${d.slice(3,6)}-${d.slice(6,9)}`;
+        if (digits.length === 9) {
+          return `${digits.slice(0,3)}-${digits.slice(3,6)}-${digits.slice(6,9)}`;
         }
-        const m = String(s).match(/^(\d{3})-(\d{3})-(\d{3})(?:-(\d{3}))?$/);
-        if (m) return m[4] ? `${m[1]}-${m[2]}-${m[3]}-${m[4]}` : `${m[1]}-${m[2]}-${m[3]}`;
-        return undefined;
+        // For any other length, return raw digits without forcing format
+        return digits;
       };
 
       const model = this.client.getGenerativeModel({
