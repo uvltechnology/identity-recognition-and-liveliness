@@ -203,6 +203,8 @@ class OCRProcessor {
         // This toggles all UMID-specific extraction in fillUmidFromWords()
     const applyUmidRules = this.isUmidSelected();
     const applyTinRules = this.isTinIdSelected();
+    const applyPostalIdRules = this.isPostalIdSelected();
+    const applyPagibigRules = this.isPagibigSelected ? this.isPagibigSelected() : (document.getElementById('id-type') && String(document.getElementById('id-type').value).toLowerCase() === 'pagibig');
         // Display extracted identity fields first
         if (result.fields) {
             // Also try to populate the details form from server-side extracted fields
@@ -246,6 +248,14 @@ class OCRProcessor {
             if (applyUmidRules && window.UMID && typeof window.UMID.fillFromText === 'function') {
                 window.UMID.fillFromText(result.basicText.text);
             }
+            // Postal ID parsing
+            if (applyPostalIdRules && window.POSTALID && typeof window.POSTALID.fillFromText === 'function') {
+                window.POSTALID.fillFromText(result.basicText.text);
+            }
+            // Pag-IBIG ID parsing (OCR-only)
+            if (applyPagibigRules && window.PAGIBIG && typeof window.PAGIBIG.fillFromText === 'function') {
+                window.PAGIBIG.fillFromText(result.basicText.text);
+            }
         }
 
         if (result.structuredText && result.structuredText.text) {
@@ -270,6 +280,12 @@ class OCRProcessor {
             }
             if (applyUmidRules && window.UMID && typeof window.UMID.fillFromText === 'function') {
                 window.UMID.fillFromText(result.structuredText.text);
+            }
+            if (applyPostalIdRules && window.POSTALID && typeof window.POSTALID.fillFromText === 'function') {
+                window.POSTALID.fillFromText(result.structuredText.text);
+            }
+            if (applyPagibigRules && window.PAGIBIG && typeof window.PAGIBIG.fillFromText === 'function') {
+                window.PAGIBIG.fillFromText(result.structuredText.text);
             }
         }
 
@@ -303,6 +319,14 @@ class OCRProcessor {
             if (applyTinRules && window.TINID && typeof window.TINID.fillFromWords === 'function') {
                 window.TINID.fillFromWords(result.basicText.words);
             }
+            // Postal ID-specific extraction handled by separate module (window.POSTALID)
+            if (applyPostalIdRules && window.POSTALID && typeof window.POSTALID.fillFromWords === 'function') {
+                window.POSTALID.fillFromWords(result.basicText.words);
+            }
+            // Pag-IBIG-specific extraction handled by separate module (window.PAGIBIG)
+            if (applyPagibigRules && window.PAGIBIG && typeof window.PAGIBIG.fillFromWords === 'function') {
+                window.PAGIBIG.fillFromWords(result.basicText.words);
+            }
         }
 
         // Processing info
@@ -313,6 +337,13 @@ class OCRProcessor {
             );
             container.appendChild(infoSection);
         }
+    }
+
+    // Helper: Only apply Pag-IBIG rules when selected
+    isPagibigSelected() {
+        const sel = document.getElementById('id-type');
+        if (!sel) return false;
+        return String(sel.value).toLowerCase() === 'pagibig';
     }
 
     // Passport extraction moved to js/scanning-algorithm/passport.js
@@ -445,6 +476,13 @@ class OCRProcessor {
         const sel = document.getElementById('id-type');
         if (!sel) return false;
         return String(sel.value).toLowerCase() === 'tin-id';
+    }
+
+    // Helper: Only apply Postal ID rules when selected
+    isPostalIdSelected() {
+        const sel = document.getElementById('id-type');
+        if (!sel) return false;
+        return String(sel.value).toLowerCase() === 'postal-id';
     }
 
     // UMID extraction moved to js/scanning-algorithm/umid.js
@@ -582,7 +620,9 @@ class OCRProcessor {
                                 ? 'National ID'
                                 : this.isTinIdSelected()
                                     ? 'TIN'
-                                    : 'Identity Document';
+                                    : this.isPostalIdSelected()
+                                        ? 'Postal ID'
+                                        : 'Identity Document';
             titleEl.textContent = `🤖 AI extraction (${typeLabel})`;
             aiSection.appendChild(titleEl);
 
