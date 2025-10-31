@@ -307,7 +307,7 @@ app.get('/embed/session/:id', async (req, res) => {
           <script src="https://cdn.tailwindcss.com"></script>
           <style>
             body { margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
-            .container { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+            .container { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); max-width: 100% !important;}
             .card { background: white; padding: 2rem; border-radius: 1rem; box-shadow: 0 20px 50px rgba(0,0,0,0.2); max-width: 400px; width: 90%; text-align: center; }
             .title { font-size: 1.5rem; font-weight: bold; margin-bottom: 0.5rem; color: #1f2937; }
             .subtitle { color: #6b7280; margin-bottom: 2rem; font-size: 0.95rem; }
@@ -344,7 +344,7 @@ app.get('/embed/session/:id', async (req, res) => {
             </div>
           </div>
 
-          <div class="container">
+          <div class="container w-100">
             <div id="authCard" class="card" style="display: none;">
               <div class="title">Authorization Test</div>
               <div class="subtitle">Test Mode - Choose Authorization Flow</div>
