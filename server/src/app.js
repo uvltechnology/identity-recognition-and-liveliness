@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
 import OCRService from './services/ocrService.js';
+import GeminiService from './services/geminiService.js';
 import { extractIdentityFromText } from './services/identityExtractor.js';
 import { extractFieldsUsingOpenAI } from './services/openaiExtractor.js';
 
@@ -33,6 +34,12 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const ocrService = new OCRService();
+const geminiService = new GeminiService();
+
+// Parse JSON and enable CORS BEFORE defining routes (so req.body works for all endpoints)
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Helper to POST JSON to a webhook URL (best-effort, non-blocking)
 async function safePostWebhook(url, body) {
@@ -70,10 +77,87 @@ const upload = multer({
   }
 });
 
-// middlewares
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// AI extraction endpoint for Postal ID (Gemini first)
+app.post('/api/ai/postal-id/parse', async (req, res) => {
+  try {
+    const { rawText } = req.body || {};
+    if (!rawText || !rawText.trim()) {
+      return res.status(400).json({ success: false, error: 'rawText is required' });
+    }
+    const preview = String(rawText).slice(0, 120).replace(/\s+/g, ' ');
+    console.log(`[AI][Postal] Request received: len=${rawText.length} preview="${preview}"`);
+    if (!geminiService.enabled) {
+      console.warn('[AI][Postal] Gemini disabled (no API key).');
+      return res.status(501).json({ success: false, error: 'Gemini not configured', disabled: true });
+    }
+    const result = await geminiService.extractPostalID(rawText);
+    if (result?.error && !result?.disabled) {
+      console.warn('[AI][Postal] Gemini error:', result.error, result.details || '');
+    } else {
+      const fieldsLog = {
+        firstName: result.firstName,
+        lastName: result.lastName,
+        birthDate: result.birthDate,
+        idNumber: result.idNumber,
+        confidence: result.confidence
+      };
+      console.log(`[AI][Postal] Parsed fields via ${result.modelUsed || geminiService.modelId}:`, fieldsLog);
+    }
+    if (result.error && !result.disabled) {
+      return res.status(502).json({ success: false, error: result.error, details: result.details });
+    }
+    return res.json({ success: true, fields: {
+      firstName: result.firstName,
+      lastName: result.lastName,
+      birthDate: result.birthDate,
+      idNumber: result.idNumber,
+    }, confidence: result.confidence, raw: result.rawText, modelUsed: result.modelUsed });
+  } catch (err) {
+    console.error('AI Postal ID parse endpoint error:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error in AI parse' });
+  }
+});
+
+// AI extraction endpoint for Pag-IBIG (HDMF) ID (Gemini first)
+app.post('/api/ai/pagibig/parse', async (req, res) => {
+  try {
+    const { rawText } = req.body || {};
+    if (!rawText || !rawText.trim()) {
+      return res.status(400).json({ success: false, error: 'rawText is required' });
+    }
+    const preview = String(rawText).slice(0, 120).replace(/\s+/g, ' ');
+    console.log(`[AI][PagIBIG] Request received: len=${rawText.length} preview="${preview}"`);
+    if (!geminiService.enabled) {
+      console.warn('[AI][PagIBIG] Gemini disabled (no API key).');
+      return res.status(501).json({ success: false, error: 'Gemini not configured', disabled: true });
+    }
+    const result = await geminiService.extractPagibigID(rawText);
+    if (result?.error && !result?.disabled) {
+      console.warn('[AI][PagIBIG] Gemini error:', result.error, result.details || '');
+    } else {
+      const fieldsLog = {
+        firstName: result.firstName,
+        lastName: result.lastName,
+        birthDate: result.birthDate,
+        idNumber: result.idNumber,
+        confidence: result.confidence
+      };
+      console.log(`[AI][PagIBIG] Parsed fields via ${result.modelUsed || geminiService.modelId}:`, fieldsLog);
+    }
+    if (result.error && !result.disabled) {
+      return res.status(502).json({ success: false, error: result.error, details: result.details });
+    }
+    return res.json({ success: true, fields: {
+      firstName: result.firstName,
+      lastName: result.lastName,
+      birthDate: result.birthDate,
+      idNumber: result.idNumber,
+    }, confidence: result.confidence, raw: result.rawText, modelUsed: result.modelUsed });
+  } catch (err) {
+    console.error('AI PagIBIG parse endpoint error:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error in AI parse' });
+  }
+});
 
 // Serve static files from public directory
 app.use(express.static(path.join(__dirname, '../public')));
@@ -82,6 +166,162 @@ app.use('/json', express.static(path.join(__dirname, 'json')));
 
 // routes
 app.get('/health', (req, res) => res.json({ ok: true }));
+
+// AI extraction endpoint for Driver's License (Gemini first)
+app.post('/api/ai/driver-license/parse', async (req, res) => {
+  try {
+    const { rawText } = req.body || {};
+    if (!rawText || !rawText.trim()) {
+      return res.status(400).json({ success: false, error: 'rawText is required' });
+    }
+    if (!geminiService.enabled) {
+      return res.status(501).json({ success: false, error: 'Gemini not configured', disabled: true });
+    }
+  const result = await geminiService.extractDriverLicense(rawText);
+    if (result.error && !result.disabled) {
+      return res.status(502).json({ success: false, error: result.error, details: result.details });
+    }
+    return res.json({ success: true, fields: {
+      firstName: result.firstName,
+      lastName: result.lastName,
+      birthDate: result.birthDate,
+      idNumber: result.idNumber,
+    }, confidence: result.confidence, raw: result.rawText, modelUsed: result.modelUsed });
+  } catch (err) {
+    console.error('AI parse endpoint error:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error in AI parse' });
+  }
+});
+
+// AI extraction endpoint for PhilHealth (Gemini first)
+app.post('/api/ai/philhealth/parse', async (req, res) => {
+  try {
+    const { rawText } = req.body || {};
+    if (!rawText || !rawText.trim()) {
+      return res.status(400).json({ success: false, error: 'rawText is required' });
+    }
+    if (!geminiService.enabled) {
+      return res.status(501).json({ success: false, error: 'Gemini not configured', disabled: true });
+    }
+    const result = await geminiService.extractPhilHealth(rawText);
+    if (result.error && !result.disabled) {
+      return res.status(502).json({ success: false, error: result.error, details: result.details });
+    }
+    return res.json({ success: true, fields: {
+      firstName: result.firstName,
+      lastName: result.lastName,
+      birthDate: result.birthDate,
+      idNumber: result.idNumber,
+    }, confidence: result.confidence, raw: result.rawText, modelUsed: result.modelUsed });
+  } catch (err) {
+    console.error('AI PhilHealth parse endpoint error:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error in AI parse' });
+  }
+});
+
+// AI extraction endpoint for UMID (Gemini first)
+app.post('/api/ai/umid/parse', async (req, res) => {
+  try {
+    const { rawText } = req.body || {};
+    if (!rawText || !rawText.trim()) {
+      return res.status(400).json({ success: false, error: 'rawText is required' });
+    }
+    if (!geminiService.enabled) {
+      return res.status(501).json({ success: false, error: 'Gemini not configured', disabled: true });
+    }
+    const result = await geminiService.extractUMID(rawText);
+    if (result.error && !result.disabled) {
+      return res.status(502).json({ success: false, error: result.error, details: result.details });
+    }
+    return res.json({ success: true, fields: {
+      firstName: result.firstName,
+      lastName: result.lastName,
+      birthDate: result.birthDate,
+      idNumber: result.idNumber,
+    }, confidence: result.confidence, raw: result.rawText, modelUsed: result.modelUsed });
+  } catch (err) {
+    console.error('AI UMID parse endpoint error:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error in AI parse' });
+  }
+});
+
+// AI extraction endpoint for National ID (Gemini first)
+app.post('/api/ai/national-id/parse', async (req, res) => {
+  try {
+    const { rawText } = req.body || {};
+    if (!rawText || !rawText.trim()) {
+      return res.status(400).json({ success: false, error: 'rawText is required' });
+    }
+    if (!geminiService.enabled) {
+      return res.status(501).json({ success: false, error: 'Gemini not configured', disabled: true });
+    }
+    const result = await geminiService.extractNationalID(rawText);
+    if (result.error && !result.disabled) {
+      return res.status(502).json({ success: false, error: result.error, details: result.details });
+    }
+    return res.json({ success: true, fields: {
+      firstName: result.firstName,
+      lastName: result.lastName,
+      birthDate: result.birthDate,
+      idNumber: result.idNumber,
+    }, confidence: result.confidence, raw: result.rawText, modelUsed: result.modelUsed });
+  } catch (err) {
+    console.error('AI National ID parse endpoint error:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error in AI parse' });
+  }
+});
+
+// AI extraction endpoint for Passport (Gemini first)
+app.post('/api/ai/passport/parse', async (req, res) => {
+  try {
+    const { rawText } = req.body || {};
+    if (!rawText || !rawText.trim()) {
+      return res.status(400).json({ success: false, error: 'rawText is required' });
+    }
+    if (!geminiService.enabled) {
+      return res.status(501).json({ success: false, error: 'Gemini not configured', disabled: true });
+    }
+    const result = await geminiService.extractPassport(rawText);
+    if (result.error && !result.disabled) {
+      return res.status(502).json({ success: false, error: result.error, details: result.details });
+    }
+    return res.json({ success: true, fields: {
+      firstName: result.firstName,
+      lastName: result.lastName,
+      birthDate: result.birthDate,
+      idNumber: result.idNumber,
+    }, confidence: result.confidence, raw: result.rawText, modelUsed: result.modelUsed });
+  } catch (err) {
+    console.error('AI Passport parse endpoint error:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error in AI parse' });
+  }
+});
+
+// AI extraction endpoint for TIN ID (Gemini first)
+app.post('/api/ai/tin-id/parse', async (req, res) => {
+  try {
+    const { rawText } = req.body || {};
+    if (!rawText || !rawText.trim()) {
+      return res.status(400).json({ success: false, error: 'rawText is required' });
+    }
+    if (!geminiService.enabled) {
+      return res.status(501).json({ success: false, error: 'Gemini not configured', disabled: true });
+    }
+    const result = await geminiService.extractTINID(rawText);
+    if (result.error && !result.disabled) {
+      return res.status(502).json({ success: false, error: result.error, details: result.details });
+    }
+    return res.json({ success: true, fields: {
+      firstName: result.firstName,
+      lastName: result.lastName,
+      birthDate: result.birthDate,
+      idNumber: result.idNumber,
+    }, confidence: result.confidence, raw: result.rawText });
+  } catch (err) {
+    console.error('AI TIN ID parse endpoint error:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error in AI parse' });
+  }
+});
 
 // OCR endpoints
 app.post('/api/ocr/text', upload.single('image'), async (req, res) => {

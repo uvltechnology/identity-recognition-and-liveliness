@@ -149,6 +149,8 @@ class IdentityOCRApp {
             // Initial sizing based on default selection
             this.sizeGuideRectangle();
         }
+
+        // Clear button removed per request
     }
 
     checkCameraSupport() {

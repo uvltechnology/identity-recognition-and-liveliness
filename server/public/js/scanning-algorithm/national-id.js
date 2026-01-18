@@ -59,71 +59,83 @@
     },
 
     // From raw text block (basic/structured)
-    fillFromText(text) {
+    async fillFromText(text) {
       if (!this.isSelected()) return;
       if (!text) return;
 
       const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
       const rawText = text.replace(/\u0000/g, ' ').trim();
+
+      // AI-first: request National ID fields
+      let aiFirstName, aiLastName, aiBirthDate, aiIdNumber, aiConfidence;
+      try {
+        if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+          window.ocrProcessor.showAIStatus('Requesting AI extraction (National ID)…');
+        }
+        const resp = await fetch('/api/ai/national-id/parse', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rawText })
+        });
+        if (resp.status === 501) {
+          if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+            window.ocrProcessor.showAIStatus('AI disabled on server. Set GEMINI_API_KEY in .env and restart.');
+          }
+        } else if (!resp.ok) {
+          let errPayload = null; try { errPayload = await resp.json(); } catch {}
+          const extra = errPayload?.details ? ` Details: ${errPayload.details}` : '';
+          if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+            window.ocrProcessor.showAIStatus(`AI request failed (HTTP ${resp.status}).${extra} Using OCR rules.`);
+          }
+        } else {
+          const data = await resp.json();
+          if (data && data.success && data.fields) {
+            aiFirstName = data.fields.firstName || undefined;
+            aiLastName = data.fields.lastName || undefined;
+            aiBirthDate = data.fields.birthDate || undefined;
+            aiIdNumber = data.fields.idNumber || undefined;
+            aiConfidence = data.confidence;
+            if (window.ocrProcessor && typeof window.ocrProcessor.showAIResultsDL === 'function') {
+              window.ocrProcessor.showAIResultsDL({ firstName: aiFirstName, lastName: aiLastName, birthDate: aiBirthDate, idNumber: aiIdNumber, confidence: aiConfidence });
+            }
+            if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+              window.ocrProcessor.showAIStatus('AI extraction complete (National ID).');
+            }
+          } else if (data && data.raw) {
+            if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+              window.ocrProcessor.showAIStatus('AI responded, but no fields were parsed (National ID).');
+            }
+            const aiPanel = document.getElementById('ai-results-container');
+            if (aiPanel) {
+              const pre = document.createElement('pre');
+              pre.style.cssText = 'white-space: pre-wrap; background: #f8fafc; padding: 8px; border-radius: 6px; border: 1px solid #e2e8f0;';
+              pre.textContent = data.raw;
+              aiPanel.innerHTML = '';
+              aiPanel.appendChild(pre);
+            }
+          }
+        }
+      } catch (e) {
+        if (window.ocrProcessor && typeof window.ocrProcessor.showAIStatus === 'function') {
+          window.ocrProcessor.showAIStatus('AI network error (National ID). Using OCR rules.');
+        }
+      }
+
+      // If AI filled some fields already, set them now
+      if (window.ocrProcessor && (aiLastName || aiFirstName || aiIdNumber || aiBirthDate)) {
+        window.ocrProcessor.fillDetailsForm({ idType: 'national-id', lastName: aiLastName, firstName: aiFirstName, idNumber: aiIdNumber, birthDate: aiBirthDate });
+        return; // AI-first succeeded; no need to parse heuristics unless you want to merge
+      }
+
+      // Heuristic fallback (existing logic)
       const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
       const lowerJoined = rawText.toLowerCase();
 
-      let lastName;
-      for (const line of lines) {
-        const l = line.toLowerCase();
-        if (/\b(apelyido|last\s*name)\b/.test(l)) {
-          const after = line.split(/:|\-|–|—/).slice(1).join(':') || line.replace(/.*?(apelyido|last\s*name)\b[:\s-]*/i, '');
-          lastName = clean(after) || undefined;
-          if (lastName && /\b(mga\s+pangalan|given\s+names?)\b/i.test(lastName)) {
-            lastName = lastName.replace(/\b(mga\s+pangalan|given\s+names?)\b.*$/i, '').trim();
-          }
-          break;
-        }
-      }
+      let lastName; for (const line of lines) { const l = line.toLowerCase(); if (/\b(apelyido|last\s*name)\b/.test(l)) { const after = line.split(/:|\-|–|—/).slice(1).join(':') || line.replace(/.*?(apelyido|last\s*name)\b[:\s-]*/i, ''); lastName = clean(after) || undefined; if (lastName && /\b(mga\s+pangalan|given\s+names?)\b/i.test(lastName)) { lastName = lastName.replace(/\b(mga\s+pangalan|given\s+names?)\b.*$/i, '').trim(); } break; } }
+      let firstName; for (const line of lines) { const l = line.toLowerCase(); if (/\b(mga\s+pangalan|given\s+names?)\b/.test(l)) { const after = line.split(/:|\-|–|—/).slice(1).join(':') || line.replace(/.*?(mga\s+pangalan|given\s+names?)\b[:\s-]*/i, ''); firstName = clean(after) || undefined; break; } }
 
-      let firstName;
-      for (const line of lines) {
-        const l = line.toLowerCase();
-        if (/\b(mga\s+pangalan|given\s+names?)\b/.test(l)) {
-          const after = line.split(/:|\-|–|—/).slice(1).join(':') || line.replace(/.*?(mga\s+pangalan|given\s+names?)\b[:\s-]*/i, '');
-          firstName = clean(after) || undefined;
-          break;
-        }
-      }
+      let birthDate; { const rx = /(petsa\s+ng\s+kapanganakan\s*\/\s*date\s+of\s+birth)[:\s-]*([A-Za-z0-9 ,\/.\-]+)/i; const m = rawText.match(rx); if (m) { const tail = clean(m[2]); const parsed = normalizeDate(tail); birthDate = parsed || tail; } else { const rx2 = /(petsa\s+ng\s+kapanganakan|date\s+of\s+birth)[:\s-]*([A-Za-z0-9 ,\/.\-]+)/i; const m2 = rawText.match(rx2); if (m2) { const tail2 = clean(m2[2]); birthDate = normalizeDate(tail2) || tail2; } } }
 
-      let birthDate;
-      {
-        const rx = /(petsa\s+ng\s+kapanganakan\s*\/\s*date\s+of\s+birth)[:\s-]*([A-Za-z0-9 ,\/.\-]+)/i;
-        const m = rawText.match(rx);
-        if (m) {
-          const tail = clean(m[2]);
-          const parsed = normalizeDate(tail);
-          birthDate = parsed || tail;
-        } else {
-          const rx2 = /(petsa\s+ng\s+kapanganakan|date\s+of\s+birth)[:\s-]*([A-Za-z0-9 ,\/.\-]+)/i;
-          const m2 = rawText.match(rx2);
-          if (m2) {
-            const tail2 = clean(m2[2]);
-            birthDate = normalizeDate(tail2) || tail2;
-          }
-        }
-      }
-
-      let idNumber;
-      {
-        const idx = lowerJoined.indexOf('philippine identification card');
-        if (idx !== -1) {
-          const after = rawText.slice(idx + 'philippine identification card'.length);
-          const num = after.match(/([A-Z0-9][A-Z0-9\- ]{4,})/i);
-          if (num) {
-            idNumber = clean(num[1]).replace(/\s+/g, '');
-          }
-        }
-        if (!idNumber) {
-          const crn = rawText.match(/\bCRN[:\s-]*([0-9\- ]{8,})/i);
-          if (crn) idNumber = clean(crn[1]).replace(/\s+/g, '');
-        }
-      }
+      let idNumber; { const idx = lowerJoined.indexOf('philippine identification card'); if (idx !== -1) { const after = rawText.slice(idx + 'philippine identification card'.length); const num = after.match(/([A-Z0-9][A-Z0-9\- ]{4,})/i); if (num) { idNumber = clean(num[1]).replace(/\s+/g, ''); } } if (!idNumber) { const crn = rawText.match(/\bCRN[:\s-]*([0-9\- ]{8,})/i); if (crn) idNumber = clean(crn[1]).replace(/\s+/g, ''); } }
 
       // Respect original behavior: only set if empty
       const idNumEl = document.getElementById('id-number');
