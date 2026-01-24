@@ -38,9 +38,11 @@ class GeminiService {
       'Given noisy OCR text, return a single JSON object with these keys:',
       '{"firstName": string | null, "lastName": string | null, "birthDate": string | null, "idNumber": string | null, "confidence": number}',
       'Rules:',
-      '- birthDate must be ISO date: YYYY-MM-DD if month/day are known; otherwise null.',
-      '- idNumber must follow 3-2-6 pattern XXX-XX-XXXXXX if derivable; else null.',
-      "- If multiple candidates, choose the most plausible based on labels (e.g., 'Surname', 'First Name', 'DOB', 'Birth Date', 'DLN', 'License No').",
+      '- Names are typically in format "LASTNAME, FIRSTNAME MIDDLENAME". Extract lastName (before comma) and firstName (first word after comma).',
+      '- birthDate must be ISO date: YYYY-MM-DD. Look for dates near labels like "Date of Birth", "DOB", "Birth", or after gender indicator (M/F).',
+      '- idNumber must follow 3-2-6 pattern XXX-XX-XXXXXX (e.g., A01-23-456789). Look for this pattern near "License No", "DLN", or "Agency Code".',
+      "- Common labels: 'Last Name', 'First Name', 'Middle Name', 'Surname', 'Given Name', 'DOB', 'Date of Birth', 'Sex', 'DLN', 'License No'.",
+      '- confidence should be 0-100 based on how confident you are in the extracted fields.',
       '- Respond with ONLY the compact JSON object. No code blocks, no prose.'
     ].join('\n');
 
@@ -110,6 +112,11 @@ class GeminiService {
         return undefined;
       };
 
+      if (this.debug) {
+        console.log(`[GeminiService][Driver License] Using model: ${this.modelId}`);
+        console.log(`[GeminiService][Driver License] OCR text preview: ${rawText.slice(0, 200)}...`);
+      }
+
       const model = this.client.getGenerativeModel({
         model: this.modelId,
         systemInstruction: system
@@ -119,6 +126,11 @@ class GeminiService {
         generationConfig: { responseMimeType: 'application/json', temperature: 0.2 }
       });
       const text = result?.response?.text?.() || '';
+      
+      if (this.debug) {
+        console.log(`[GeminiService][Driver License] Raw AI response: ${text}`);
+      }
+      
       const trimmed = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/,'').trim();
       let parsed;
       try {
@@ -138,7 +150,12 @@ class GeminiService {
       const birthDate = typeof parsed.birthDate === 'string' ? (normalizeDate(parsed.birthDate) || undefined) : undefined;
       const idNumber = typeof parsed.idNumber === 'string' ? (normalizeDLId(parsed.idNumber) || undefined) : undefined;
       const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : undefined;
-      return { firstName, lastName, birthDate, idNumber, confidence, rawText: text };
+      
+      if (this.debug) {
+        console.log(`[GeminiService][Driver License] Extracted: firstName=${firstName}, lastName=${lastName}, birthDate=${birthDate}, idNumber=${idNumber}, confidence=${confidence}`);
+      }
+      
+      return { firstName, lastName, birthDate, idNumber, confidence, rawText: text, modelUsed: this.modelId };
     } catch (err) {
       const msg = err?.message || String(err);
       console.error('[GeminiService] extractDriverLicense error:', msg);
@@ -1018,6 +1035,113 @@ class GeminiService {
       const msg = err?.message || String(err);
       console.error('[GeminiService] extractPagibigID error:', msg);
       return { error: 'Gemini parsing failed', details: msg };
+    }
+  }
+
+  /**
+   * Verify face liveness using AI image analysis
+   * @param {string} imageBase64 - Base64 encoded image data
+   * @param {object} localMetrics - Local detection metrics (livenessScore, movementDetected)
+   * @returns {Promise<{isLive: boolean, confidence: number, reason: string, details?: string}>}
+   */
+  async verifyFaceLiveness(imageBase64, localMetrics = {}) {
+    if (!this.enabled) {
+      return { error: 'Gemini API key not configured', disabled: true };
+    }
+
+    const system = [
+      'You are a face liveness detection AI. Analyze the provided image to determine if it shows a LIVE person or a SPOOFING ATTEMPT (photo of a photo, screen display, printed image, mask, etc.).',
+      '',
+      'Return a JSON object with these keys:',
+      '{"isLive": boolean, "confidence": number, "reason": string, "details": string}',
+      '',
+      'Analyze for these liveness indicators:',
+      '1. Natural skin texture and lighting gradients (photos appear flat)',
+      '2. Presence of screen/paper edges, reflections, or moiré patterns',
+      '3. Natural depth and 3D facial features vs flat 2D appearance',
+      '4. Natural eye reflection (catch lights) vs printed/screen eyes',
+      '5. Background consistency (real backgrounds vs photo backgrounds)',
+      '6. Image quality artifacts typical of photos-of-photos or screens',
+      '',
+      'confidence should be 0-100.',
+      'reason should be a brief explanation.',
+      'Respond with ONLY the JSON object. No code blocks, no prose.'
+    ].join('\n');
+
+    try {
+      // Extract base64 data and mime type
+      let mimeType = 'image/jpeg';
+      let base64Data = imageBase64;
+      
+      if (imageBase64.startsWith('data:')) {
+        const match = imageBase64.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          mimeType = match[1];
+          base64Data = match[2];
+        }
+      }
+
+      if (this.debug) {
+        console.log(`[GeminiService][Face Liveness] Using model: ${this.modelId}`);
+        console.log(`[GeminiService][Face Liveness] Local metrics: score=${localMetrics.livenessScore}, movement=${localMetrics.movementDetected}`);
+      }
+
+      const model = this.client.getGenerativeModel({
+        model: this.modelId,
+        systemInstruction: system
+      });
+
+      const result = await model.generateContent({
+        contents: [{
+          role: 'user',
+          parts: [
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: base64Data
+              }
+            },
+            {
+              text: `Analyze this face image for liveness. Local detection metrics: livenessScore=${localMetrics.livenessScore || 'N/A'}, movementDetected=${localMetrics.movementDetected || 'N/A'}. Is this a live person or a spoofing attempt?`
+            }
+          ]
+        }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
+      });
+
+      const text = result?.response?.text?.() || '';
+      
+      if (this.debug) {
+        console.log(`[GeminiService][Face Liveness] Raw AI response: ${text}`);
+      }
+
+      const trimmed = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+      let parsed;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (e) {
+        const match = trimmed.match(/\{[\s\S]*\}/);
+        if (match) {
+          parsed = JSON.parse(match[0]);
+        } else {
+          throw e;
+        }
+      }
+
+      const isLive = parsed.isLive === true;
+      const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : (isLive ? 80 : 20);
+      const reason = typeof parsed.reason === 'string' ? parsed.reason : (isLive ? 'Live person detected' : 'Spoofing suspected');
+      const details = typeof parsed.details === 'string' ? parsed.details : undefined;
+
+      if (this.debug) {
+        console.log(`[GeminiService][Face Liveness] Result: isLive=${isLive}, confidence=${confidence}, reason=${reason}`);
+      }
+
+      return { isLive, confidence, reason, details };
+    } catch (err) {
+      const msg = err?.message || String(err);
+      console.error('[GeminiService] verifyFaceLiveness error:', msg);
+      return { error: 'Face liveness verification failed', details: msg };
     }
   }
 }

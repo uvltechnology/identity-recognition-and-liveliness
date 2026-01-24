@@ -1,5 +1,3 @@
-// OpenAI usage removed per requirement; heuristic and MRZ parsing only
-
 function parseMrz(text) {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const mrz = lines.filter(l => /^[A-Z0-9<]{25,}$/.test(l));
