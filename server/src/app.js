@@ -133,10 +133,25 @@ app.post('/api/ai/driver-license/parse', async (req, res) => {
     if (!rawText || !rawText.trim()) {
       return res.status(400).json({ success: false, error: 'rawText is required' });
     }
+    const preview = String(rawText).slice(0, 120).replace(/\s+/g, ' ');
+    console.log(`[AI][Driver License] Request received: len=${rawText.length} preview="${preview}"`);
     if (!geminiService.enabled) {
+      console.warn('[AI][Driver License] Gemini disabled (no API key).');
       return res.status(501).json({ success: false, error: 'Gemini not configured', disabled: true });
     }
-  const result = await geminiService.extractDriverLicense(rawText);
+    const result = await geminiService.extractDriverLicense(rawText);
+    if (result?.error && !result?.disabled) {
+      console.warn('[AI][Driver License] Gemini error:', result.error, result.details || '');
+    } else {
+      const fieldsLog = {
+        firstName: result.firstName,
+        lastName: result.lastName,
+        birthDate: result.birthDate,
+        idNumber: result.idNumber,
+        confidence: result.confidence
+      };
+      console.log(`[AI][Driver License] Parsed fields via ${result.modelUsed || geminiService.modelId}:`, fieldsLog);
+    }
     if (result.error && !result.disabled) {
       return res.status(502).json({ success: false, error: result.error, details: result.details });
     }
@@ -359,6 +374,55 @@ app.post('/api/ocr/identity', upload.single('image'), async (req, res) => {
       success: false,
       error: 'Internal server error during identity OCR processing'
     });
+  }
+});
+
+// AI Face Liveness Detection endpoint
+app.post('/api/ai/face/liveness', async (req, res) => {
+  try {
+    const { image, livenessScore, movementDetected } = req.body || {};
+    
+    if (!image) {
+      return res.status(400).json({ success: false, error: 'image is required' });
+    }
+
+    console.log(`[AI][Face Liveness] Request received: livenessScore=${livenessScore}, movementDetected=${movementDetected}`);
+
+    if (!geminiService.enabled) {
+      console.warn('[AI][Face Liveness] Gemini disabled (no API key). Using local score.');
+      // Fallback to local liveness score
+      return res.json({
+        isLive: livenessScore >= 70 && movementDetected,
+        confidence: livenessScore,
+        reason: livenessScore >= 70 ? 'Local detection passed' : 'Local detection failed',
+        details: 'AI verification unavailable, using local detection'
+      });
+    }
+
+    const result = await geminiService.verifyFaceLiveness(image, { livenessScore, movementDetected });
+    
+    if (result.error) {
+      console.warn('[AI][Face Liveness] Gemini error:', result.error);
+      // Fallback to local score on error
+      return res.json({
+        isLive: livenessScore >= 70 && movementDetected,
+        confidence: livenessScore,
+        reason: 'AI unavailable, local detection used',
+        details: result.error
+      });
+    }
+
+    console.log(`[AI][Face Liveness] Result: isLive=${result.isLive}, confidence=${result.confidence}`);
+    
+    return res.json({
+      isLive: result.isLive,
+      confidence: result.confidence,
+      reason: result.reason,
+      details: result.details
+    });
+  } catch (err) {
+    console.error('AI Face Liveness endpoint error:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error in face liveness check' });
   }
 });
 
