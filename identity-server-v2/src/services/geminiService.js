@@ -389,6 +389,182 @@ class GeminiService {
       return { error: 'Gemini parsing failed', details: err.message };
     }
   }
+
+  // Face Liveness verification
+  async verifyFaceLiveness(imageBase64, localMetrics = {}) {
+    if (!this.enabled) {
+      return { error: 'Gemini API key not configured', disabled: true };
+    }
+
+    const system = [
+      'You are a face liveness detection AI. Analyze the provided image to determine if it shows a LIVE person or a SPOOFING ATTEMPT.',
+      '',
+      'Return JSON: {"isLive": boolean, "confidence": number, "reason": string, "details": string}',
+      '',
+      'Analyze for liveness indicators:',
+      '1. Natural skin texture and lighting gradients',
+      '2. Screen/paper edges, reflections, or moiré patterns',
+      '3. Natural depth and 3D facial features',
+      '4. Natural eye reflections vs printed eyes',
+      '5. Background consistency',
+      '',
+      'confidence: 0-100',
+      'Return ONLY JSON, no prose.'
+    ].join('\n');
+
+    try {
+      let mimeType = 'image/jpeg';
+      let base64Data = imageBase64;
+      
+      if (imageBase64.startsWith('data:')) {
+        const match = imageBase64.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          mimeType = match[1];
+          base64Data = match[2];
+        }
+      }
+
+      if (this.debug) {
+        console.log(`[GeminiService][Face Liveness] Using model: ${this.modelId}`);
+      }
+
+      const model = this.client.getGenerativeModel({
+        model: this.modelId,
+        systemInstruction: system
+      });
+
+      const result = await model.generateContent({
+        contents: [{
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: base64Data } },
+            { text: `Analyze this face for liveness. Local metrics: livenessScore=${localMetrics.livenessScore || 'N/A'}, movementDetected=${localMetrics.movementDetected || 'N/A'}` }
+          ]
+        }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
+      });
+
+      const text = result?.response?.text?.() || '';
+      const trimmed = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+      
+      let parsed;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (e) {
+        const match = trimmed.match(/\{[\s\S]*\}/);
+        if (match) parsed = JSON.parse(match[0]);
+        else throw e;
+      }
+
+      return {
+        isLive: parsed.isLive === true,
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 50,
+        reason: parsed.reason || (parsed.isLive ? 'Live person detected' : 'Spoofing suspected'),
+        details: parsed.details
+      };
+    } catch (err) {
+      console.error('[GeminiService] verifyFaceLiveness error:', err.message);
+      return { error: 'Face liveness verification failed', details: err.message };
+    }
+  }
+
+  /**
+   * Verify and polish extracted fields using both image and raw text
+   * @param {string} imageBase64 - Base64 encoded image data
+   * @param {string} rawText - OCR raw text
+   * @param {object} scanningResult - Initial extraction from scanning algorithm
+   * @param {string} idType - Type of ID being processed
+   */
+  async verifyAndPolishFields(imageBase64, rawText, scanningResult, idType = 'unknown') {
+    if (!this.enabled) {
+      return { ...scanningResult, verified: false, note: 'AI not available' };
+    }
+
+    try {
+      const base64Data = imageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
+      const mimeType = 'image/jpeg';
+
+      const system = [
+        'You are an ID verification AI that verifies and corrects extracted data.',
+        'You will receive:',
+        '1. An image of an ID document',
+        '2. OCR raw text from the ID',
+        '3. Pre-extracted fields from scanning algorithm',
+        '',
+        'Your task:',
+        '- Look at the actual ID image to verify the pre-extracted data',
+        '- Correct any errors in the extracted fields',
+        '- Fill in any missing fields you can see in the image',
+        '- Return the verified/corrected data',
+        '',
+        'Return JSON only:',
+        '{',
+        '  "firstName": string|null,',
+        '  "lastName": string|null,',
+        '  "middleName": string|null,',
+        '  "birthDate": string|null (YYYY-MM-DD format),',
+        '  "idNumber": string|null,',
+        '  "idType": string,',
+        '  "confidence": number (0-100),',
+        '  "corrections": string[] (list what you corrected)',
+        '}',
+      ].join('\n');
+
+      const userPrompt = [
+        'Pre-extracted fields from scanning:',
+        JSON.stringify(scanningResult, null, 2),
+        '',
+        'OCR Raw Text:',
+        rawText,
+        '',
+        'Please verify these fields against the ID image and correct any errors.',
+      ].join('\n');
+
+      const model = this.client.getGenerativeModel({
+        model: this.modelId,
+        systemInstruction: system
+      });
+
+      const result = await model.generateContent({
+        contents: [{
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: base64Data } },
+            { text: userPrompt }
+          ]
+        }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.2 }
+      });
+
+      const text = result?.response?.text?.() || '';
+      const trimmed = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+      
+      let parsed;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (e) {
+        const match = trimmed.match(/\{[\s\S]*\}/);
+        if (match) parsed = JSON.parse(match[0]);
+        else throw e;
+      }
+
+      return {
+        firstName: parsed.firstName?.trim() || scanningResult.firstName,
+        lastName: parsed.lastName?.trim() || scanningResult.lastName,
+        middleName: parsed.middleName?.trim() || scanningResult.middleName,
+        birthDate: this.normalizeDate(parsed.birthDate) || scanningResult.birthDate,
+        idNumber: parsed.idNumber?.trim() || scanningResult.idNumber,
+        idType: parsed.idType || idType,
+        confidence: parsed.confidence || 80,
+        verified: true,
+        corrections: parsed.corrections || [],
+        modelUsed: this.modelId
+      };
+    } catch (err) {
+      console.error('[GeminiService] verifyAndPolishFields error:', err.message);
+      return { ...scanningResult, verified: false, error: err.message };
+    }
+  }
 }
 
 export default GeminiService;

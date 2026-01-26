@@ -1,39 +1,89 @@
 import 'dotenv/config';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import path from 'path';
 import https from 'https';
 import http from 'http';
 import { fileURLToPath } from 'url';
 import express from 'express';
+import cors from 'cors';
+import multer from 'multer';
 import GeminiService from './src/services/geminiService.js';
+import OCRService from './src/services/ocrService.js';
+import { extractIdentityFromText } from './src/services/identityExtractor.js';
+import { extractFieldsUsingOpenAI } from './src/services/openaiExtractor.js';
+import { scanningExtract, fallbackExtract, mergeWithFallback } from './src/services/fallbackExtractor.js';
+import sessionStore from './src/services/sessionStore.js';
+import storageModule from './src/services/storage.js';
+
+const { getSession, setSession, deleteSession, makeSessionId, cleanupTempForSession, initRedisClient } = sessionStore;
+const { uploadImageToStorage, deleteImageFromStorage, getImageUrlFromRef } = storageModule;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProduction = process.env.NODE_ENV === 'production';
-const host = process.env.HOST || 'localhost';
+const host = process.env.HOST || '0.0.0.0';
 const port = parseInt(process.env.PORT, 10) || 3000;
-const sslPort = parseInt(process.env.SSL_PORT, 10) || port + 1;
+const sslPort = parseInt(process.env.SSL_PORT, 10) || 3001;
 
 // SSL Configuration
 const sslEnabled = process.env.SSL_ENABLED === 'true';
-const sslCertPath = process.env.SSL_CERT || '../server/certs/dev-cert.pem';
-const sslKeyPath = process.env.SSL_KEY || '../server/certs/dev-key.pem';
+const sslCertPath = process.env.SSL_CERT || './certs/dev-cert.pem';
+const sslKeyPath = process.env.SSL_KEY || './certs/dev-key.pem';
 
-// Main identity server URL (for OCR proxying)
-const IDENTITY_API_URL = process.env.IDENTITY_API_URL || 'http://localhost:4000';
-
-// Initialize Gemini service for AI extraction
+// Initialize services
 const geminiService = new GeminiService();
+const ocrService = new OCRService();
+
+// Initialize Redis if configured
+(async () => {
+  try {
+    const redisUrl = process.env.REDIS_URL || '';
+    if (redisUrl) {
+      const redisModule = await import('redis');
+      await initRedisClient(redisModule.createClient, redisUrl);
+    }
+  } catch (e) { /* fallback to in-memory */ }
+})();
+
+// Multer config for file uploads
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    cb(null, allowedTypes.includes(file.mimetype));
+  }
+});
+
+// Helper for webhooks
+async function safePostWebhook(url, body) {
+  if (!url) return;
+  try {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 6000);
+    await fetch(String(url), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+      signal: controller.signal
+    });
+  } catch (e) { console.warn('[webhook] POST failed', url, e?.message); }
+}
 
 async function createServer() {
   const app = express();
   
-  // Parse JSON bodies
+  // CORS and body parsing
+  app.use(cors());
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+  // Serve static files from public directory
+  app.use(express.static(path.join(__dirname, 'public')));
+
   let vite;
   if (!isProduction) {
-    // Development: use Vite's dev server as middleware
     const { createServer: createViteServer } = await import('vite');
     vite = await createViteServer({
       server: { middlewareMode: true },
@@ -41,14 +91,15 @@ async function createServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // Production: serve static files
     const compression = (await import('compression')).default;
     const sirv = (await import('sirv')).default;
     app.use(compression());
     app.use(sirv(path.join(__dirname, 'dist/client'), { extensions: [] }));
   }
 
-  // API routes
+  // ===== API Routes =====
+  
+  // Health check
   app.get('/api/health', (req, res) => {
     res.json({ 
       status: 'ok', 
@@ -58,77 +109,7 @@ async function createServer() {
     });
   });
 
-  // Proxy OCR requests to main identity server
-  app.post('/api/ocr/:endpoint', async (req, res) => {
-    try {
-      const endpoint = req.params.endpoint;
-      const response = await fetch(`${IDENTITY_API_URL}/api/ocr/${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req.body),
-      });
-      const data = await response.json();
-      res.status(response.status).json(data);
-    } catch (err) {
-      console.error('OCR proxy error:', err);
-      res.status(502).json({ success: false, error: 'Failed to connect to OCR service' });
-    }
-  });
-
-  // AI extraction using local Gemini service
-  app.post('/api/ai/:idType/parse', async (req, res) => {
-    try {
-      const idType = req.params.idType;
-      const { rawText } = req.body || {};
-
-      if (!rawText?.trim()) {
-        return res.status(400).json({ success: false, error: 'rawText is required' });
-      }
-
-      if (!geminiService.enabled) {
-        return res.status(501).json({ success: false, error: 'Gemini not configured', disabled: true });
-      }
-
-      // Map ID type to extraction method
-      const extractors = {
-        'national-id': () => geminiService.extractNationalID(rawText),
-        'passport': () => geminiService.extractPassport(rawText),
-        'driver-license': () => geminiService.extractDriverLicense(rawText),
-        'umid': () => geminiService.extractUMID(rawText),
-        'philhealth': () => geminiService.extractPhilHealth(rawText),
-        'tin-id': () => geminiService.extractTINID(rawText),
-        'postal-id': () => geminiService.extractPostalID(rawText),
-        'pagibig': () => geminiService.extractPagibigID(rawText),
-      };
-
-      const extractor = extractors[idType];
-      if (!extractor) {
-        return res.status(400).json({ success: false, error: `Unknown ID type: ${idType}` });
-      }
-
-      console.log(`[AI] Processing ${idType} extraction...`);
-      const result = await extractor();
-
-      if (result.error && !result.disabled) {
-        return res.status(502).json({ success: false, error: result.error, details: result.details });
-      }
-
-      return res.json({
-        success: true,
-        fields: {
-          firstName: result.firstName,
-          lastName: result.lastName,
-          birthDate: result.birthDate,
-          idNumber: result.idNumber,
-        },
-        confidence: result.confidence,
-        modelUsed: result.modelUsed,
-      });
-    } catch (err) {
-      console.error('AI extraction error:', err);
-      res.status(500).json({ success: false, error: 'Internal server error' });
-    }
-  });
+  app.get('/health', (req, res) => res.json({ ok: true }));
 
   // ID types list
   app.get('/api/ids', (req, res) => {
@@ -147,21 +128,430 @@ async function createServer() {
     });
   });
 
-  // Session data endpoint for embed verification
-  app.get('/api/session/:id', (req, res) => {
-    // Mock session data - replace with actual session store
-    const sessionId = req.params.id;
-    res.json({
-      id: sessionId,
-      status: 'pending',
-      payload: {
-        idType: 'national-id',
-        testMode: false,
-        authRequired: false,
-        successUrl: null,
-      },
-      createdAt: new Date().toISOString(),
-    });
+  // AI extraction endpoint - unified for all ID types
+  app.post('/api/ai/:idType/parse', async (req, res) => {
+    try {
+      const idType = req.params.idType;
+      const { rawText } = req.body || {};
+
+      if (!rawText?.trim()) {
+        return res.status(400).json({ success: false, error: 'rawText is required' });
+      }
+
+      // === STEP 1: Scanning Algorithm (ALWAYS runs first) ===
+      const scanningResult = scanningExtract(rawText, idType);
+      console.log(`[AI/${idType}] Scanning result:`, JSON.stringify(scanningResult, null, 2));
+
+      // If scanning got all required fields, return early
+      const hasAllFields = scanningResult.firstName && scanningResult.lastName && 
+                           (scanningResult.idNumber || scanningResult.birthDate);
+      
+      if (hasAllFields) {
+        console.log(`[AI/${idType}] Scanning extracted all fields, skipping AI`);
+        return res.json({
+          success: true,
+          fields: {
+            firstName: scanningResult.firstName,
+            lastName: scanningResult.lastName,
+            birthDate: scanningResult.birthDate,
+            idNumber: scanningResult.idNumber,
+          },
+          confidence: 0.85,
+          extractionMethod: 'scanning-algorithm',
+        });
+      }
+
+      // === STEP 2: AI Enhancement (only if scanning incomplete) ===
+      if (!geminiService.enabled) {
+        return res.json({
+          success: true,
+          fields: {
+            firstName: scanningResult.firstName,
+            lastName: scanningResult.lastName,
+            birthDate: scanningResult.birthDate,
+            idNumber: scanningResult.idNumber,
+          },
+          confidence: 0.7,
+          extractionMethod: 'scanning-algorithm',
+          note: 'AI unavailable, using scanning only'
+        });
+      }
+
+      const extractors = {
+        'national-id': () => geminiService.extractNationalID(rawText),
+        'passport': () => geminiService.extractPassport(rawText),
+        'driver-license': () => geminiService.extractDriverLicense(rawText),
+        'umid': () => geminiService.extractUMID(rawText),
+        'philhealth': () => geminiService.extractPhilHealth(rawText),
+        'tin-id': () => geminiService.extractTINID(rawText),
+        'postal-id': () => geminiService.extractPostalID(rawText),
+        'pagibig': () => geminiService.extractPagibigID(rawText),
+      };
+
+      const extractor = extractors[idType];
+      if (!extractor) {
+        return res.status(400).json({ success: false, error: `Unknown ID type: ${idType}` });
+      }
+
+      console.log(`[AI] Processing ${idType} extraction...`);
+      const aiResult = await extractor();
+
+      if (aiResult.error && !aiResult.disabled) {
+        // Return scanning results even if AI fails
+        return res.json({
+          success: true,
+          fields: {
+            firstName: scanningResult.firstName,
+            lastName: scanningResult.lastName,
+            birthDate: scanningResult.birthDate,
+            idNumber: scanningResult.idNumber,
+          },
+          confidence: 0.7,
+          extractionMethod: 'scanning-algorithm',
+          note: 'AI failed, using scanning only',
+          aiError: aiResult.error
+        });
+      }
+
+      // Merge: Scanning results first, AI fills in gaps
+      const mergedFields = {
+        firstName: scanningResult.firstName || aiResult.firstName,
+        lastName: scanningResult.lastName || aiResult.lastName,
+        birthDate: scanningResult.birthDate || aiResult.birthDate,
+        idNumber: scanningResult.idNumber || aiResult.idNumber,
+      };
+
+      return res.json({
+        success: true,
+        fields: mergedFields,
+        confidence: aiResult.confidence || 0.8,
+        modelUsed: aiResult.modelUsed,
+        extractionMethod: 'scanning+ai',
+        scanning: scanningResult,
+      });
+    } catch (err) {
+      console.error('AI extraction error:', err);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  });
+
+  // Face Liveness endpoint
+  app.post('/api/ai/face/liveness', async (req, res) => {
+    try {
+      const { image, livenessScore, movementDetected } = req.body || {};
+      
+      if (!image) {
+        return res.status(400).json({ success: false, error: 'image is required' });
+      }
+
+      if (!geminiService.enabled) {
+        return res.json({
+          isLive: livenessScore >= 70 && movementDetected,
+          confidence: livenessScore,
+          reason: 'AI unavailable, using local detection'
+        });
+      }
+
+      const result = await geminiService.verifyFaceLiveness(image, { livenessScore, movementDetected });
+      
+      if (result.error) {
+        return res.json({
+          isLive: livenessScore >= 70 && movementDetected,
+          confidence: livenessScore,
+          reason: 'AI error, using local detection',
+          details: result.error
+        });
+      }
+
+      return res.json(result);
+    } catch (err) {
+      console.error('Face liveness error:', err);
+      return res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  });
+
+  // OCR endpoints
+  app.post('/api/ocr/text', upload.single('image'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ success: false, error: 'No image file provided' });
+      }
+      const result = await ocrService.extractText(req.file.buffer);
+      res.json(result);
+    } catch (error) {
+      console.error('OCR error:', error);
+      res.status(500).json({ success: false, error: 'OCR processing failed' });
+    }
+  });
+
+  app.post('/api/ocr/document', upload.single('image'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ success: false, error: 'No image file provided' });
+      }
+      const result = await ocrService.extractStructuredText(req.file.buffer);
+      res.json(result);
+    } catch (error) {
+      console.error('Document OCR error:', error);
+      res.status(500).json({ success: false, error: 'Document OCR processing failed' });
+    }
+  });
+
+  app.post('/api/ocr/identity', upload.single('image'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ success: false, error: 'No image file provided' });
+      }
+      const ocrResult = await ocrService.extractIdentityText(req.file.buffer);
+      if (!ocrResult.success) return res.json(ocrResult);
+
+      const rawText = ocrResult.basicText?.text || ocrResult.structuredText?.text || '';
+      const idType = req.body?.idType || 'national-id';
+      const fields = await extractIdentityFromText(rawText, { idType });
+
+      res.json({ success: true, fields, rawText, ocrResult });
+    } catch (error) {
+      console.error('Identity OCR error:', error);
+      res.status(500).json({ success: false, error: 'Identity OCR processing failed' });
+    }
+  });
+
+  // Base64 OCR endpoint (main endpoint for frontend)
+  app.post('/api/ocr/base64', async (req, res) => {
+    try {
+      const { image, type, idType, sessionId } = req.body;
+
+      if (!image) {
+        return res.status(400).json({ success: false, error: 'No image data provided' });
+      }
+
+      const base64Data = image.replace(/^data:image\/[a-z]+;base64,/, '');
+      const imageBuffer = Buffer.from(base64Data, 'base64');
+
+      let result;
+      switch (type) {
+        case 'document':
+          result = await ocrService.extractStructuredText(imageBuffer);
+          break;
+        case 'identity':
+          result = await ocrService.extractIdentityText(imageBuffer);
+          if (result.success) {
+            const rawText = result.basicText?.text || result.structuredText?.text || '';
+            const currentIdType = idType || 'unknown';
+            
+            console.log(`[OCR] Processing ${currentIdType}, raw text length: ${rawText.length}`);
+            
+            // === STEP 1: Scanning Algorithm (PRIMARY - extract from raw text) ===
+            const scanningFields = scanningExtract(rawText, currentIdType);
+            console.log('[Scanning] Extracted:', JSON.stringify(scanningFields, null, 2));
+            result.scanning = scanningFields;
+            
+            // Start with scanning results
+            let fields = { ...scanningFields };
+            
+            // === STEP 2: AI Verification (uses image + raw text to verify/polish) ===
+            if (geminiService.enabled) {
+              try {
+                console.log('[AI] Verifying with image + raw text...');
+                const aiVerified = await geminiService.verifyAndPolishFields(
+                  base64Data, 
+                  rawText, 
+                  scanningFields, 
+                  currentIdType
+                );
+                
+                if (aiVerified && !aiVerified.error) {
+                  fields = aiVerified;
+                  result.aiVerified = true;
+                  result.corrections = aiVerified.corrections || [];
+                  console.log('[AI] Verified:', JSON.stringify(aiVerified, null, 2));
+                }
+              } catch (e) { 
+                console.warn('AI verification failed:', e.message);
+                result.aiVerified = false;
+              }
+            }
+            
+            result.fields = fields;
+            result.rawText = rawText;
+
+            // === STEP 3: OpenAI as backup (only for missing fields) ===
+            try {
+              const openaiKey = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY;
+              if (openaiKey && (!result.fields.firstName || !result.fields.lastName)) {
+                const oa = await extractFieldsUsingOpenAI({ rawText, idType: currentIdType });
+                if (oa?.success && oa.parsed) {
+                  const merged = { ...result.fields };
+                  for (const k of ['firstName', 'lastName', 'idNumber', 'birthDate']) {
+                    if (oa.parsed[k] && !merged[k]) merged[k] = oa.parsed[k];
+                  }
+                  result.fields = merged;
+                  result.openai = { parsed: oa.parsed };
+                }
+              }
+            } catch (e) { console.warn('OpenAI extraction failed:', e); }
+
+            // Store to session if provided
+            if (sessionId) {
+              try {
+                const ttl = Number(process.env.VERIFY_SESSION_TTL_SECONDS || 3600);
+                const existing = await getSession(sessionId);
+                if (existing) {
+                  const imageRef = await uploadImageToStorage(base64Data, sessionId);
+                  existing.payload = { ...(existing.payload || {}), tempImageRef: imageRef, tempOcr: result };
+                  existing.result = { fields: result.fields, rawText: result.rawText };
+                  existing.status = result.fields?.firstName && result.fields?.lastName ? 'done' : 'processing';
+                  if (existing.status === 'done') existing.finishedAt = new Date().toISOString();
+                  await setSession(sessionId, existing, ttl);
+
+                  if (existing.status === 'done' && existing.payload?.successWebhook) {
+                    safePostWebhook(existing.payload.successWebhook, { sessionId, status: 'done', result: existing.result });
+                  }
+                }
+              } catch (e) { console.warn('Session update failed:', e); }
+            }
+          }
+          break;
+        default:
+          result = await ocrService.extractText(imageBuffer);
+      }
+
+      res.json(result);
+    } catch (error) {
+      console.error('Base64 OCR error:', error);
+      res.status(500).json({ success: false, error: 'OCR processing failed' });
+    }
+  });
+
+  // ===== Session/Verification Routes =====
+
+  // Create verification session
+  async function createVerifySessionHandler(req, res) {
+    try {
+      const payload = req.body || {};
+      const sessionId = makeSessionId();
+      const storedPayload = { ...payload };
+      
+      const sessionObj = { 
+        id: sessionId, 
+        createdAt: Date.now(), 
+        payload: storedPayload, 
+        status: 'pending' 
+      };
+      const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 3600);
+      await setSession(sessionId, sessionObj, ttl);
+
+      const origin = req.protocol + '://' + req.get('host');
+      const wrapperUrl = `${origin}/verify/session/${sessionId}`;
+      let iframeUrl = `${origin}/embed/session/${sessionId}`;
+      if (payload.origin) {
+        iframeUrl += `?expectedOrigin=${encodeURIComponent(payload.origin)}`;
+      }
+
+      console.log("Created verification session:", sessionId, "idType:", payload.idType || 'not specified');
+      res.json({ success: true, sessionId, wrapperUrl, iframeUrl });
+    } catch (e) {
+      console.error('Create session error:', e);
+      res.status(500).json({ success: false, error: 'Failed to create session' });
+    }
+  }
+
+  app.post('/api/verify/create', createVerifySessionHandler);
+  app.post('/verify/create', createVerifySessionHandler);
+
+  // Get session info
+  app.get('/api/verify/session/:id', async (req, res) => {
+    try {
+      const session = await getSession(req.params.id);
+      if (!session) return res.status(404).json({ success: false, error: 'Session not found' });
+      return res.json({ success: true, session });
+    } catch (e) {
+      res.status(500).json({ success: false, error: 'Failed to read session' });
+    }
+  });
+
+  app.get('/api/session/:id', async (req, res) => {
+    try {
+      const session = await getSession(req.params.id);
+      if (!session) {
+        return res.json({
+          id: req.params.id,
+          status: 'pending',
+          payload: { idType: 'national-id', testMode: false },
+          createdAt: new Date().toISOString(),
+        });
+      }
+      return res.json(session);
+    } catch (e) {
+      res.status(500).json({ success: false, error: 'Failed to read session' });
+    }
+  });
+
+  // Update session result
+  async function postSessionResultHandler(req, res) {
+    try {
+      const id = req.params.id;
+      const existing = await getSession(id);
+      if (!existing) return res.status(404).json({ success: false, error: 'Session not found' });
+
+      const payload = req.body || {};
+      const updated = { ...existing };
+      if (payload.status) updated.status = payload.status;
+      if (payload.result) updated.result = payload.result;
+      if (payload.finishedAt) updated.finishedAt = payload.finishedAt;
+
+      const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 3600);
+      await setSession(id, updated, ttl);
+
+      // Fire webhooks for terminal states
+      const status = (updated.status || '').toLowerCase();
+      const p = updated.payload || {};
+      if (['done', 'completed', 'success'].includes(status) && p.successWebhook) {
+        safePostWebhook(p.successWebhook, { sessionId: id, status: updated.status, result: updated.result });
+      }
+      if (['cancelled', 'canceled', 'failed'].includes(status) && p.cancelWebhook) {
+        safePostWebhook(p.cancelWebhook, { sessionId: id, status: updated.status, result: updated.result });
+      }
+      if (['done', 'completed', 'success', 'cancelled', 'canceled', 'failed'].includes(status)) {
+        cleanupTempForSession(id, { deleteImageFromStorage }).catch(() => {});
+      }
+
+      return res.json({ success: true, session: updated });
+    } catch (e) {
+      console.error('Session update error:', e);
+      res.status(500).json({ success: false, error: 'Failed to update session' });
+    }
+  }
+
+  app.post('/api/verify/session/:id/result', postSessionResultHandler);
+  app.post('/verify/session/:id/result', postSessionResultHandler);
+
+  // Get temp session data
+  app.get('/api/verify/session/:id/temp', async (req, res) => {
+    try {
+      const sess = await getSession(req.params.id);
+      if (!sess) return res.status(404).json({ success: false, error: 'Session not found' });
+      
+      const imageRef = sess.payload?.tempImageRef;
+      const ocr = sess.payload?.tempOcr;
+      const imageUrl = await getImageUrlFromRef(imageRef);
+
+      let imageData = null;
+      if (imageRef?.type === 'local' && imageRef?.url) {
+        try {
+          const publicDir = path.join(__dirname, 'public');
+          const filePath = path.join(publicDir, imageRef.url.replace(/^\//, ''));
+          const b = await fsPromises.readFile(filePath);
+          const ext = path.extname(filePath).toLowerCase();
+          const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+          imageData = `data:${mime};base64,${b.toString('base64')}`;
+        } catch (e) { /* ignore */ }
+      }
+
+      return res.json({ success: true, imageRef, imageUrl, imageData, ocr });
+    } catch (e) {
+      res.status(500).json({ success: false, error: 'Failed to read session data' });
+    }
   });
 
   // SSR handler for all pages
@@ -227,8 +617,16 @@ async function createServer() {
   });
 
   // Start HTTP server
-  http.createServer(app).listen(port, host, () => {
+  const httpServer = app.listen(port, host, () => {
     console.log(`HTTP server running at http://${host}:${port}`);
+  });
+
+  httpServer.on('error', (err) => {
+    console.error('HTTP server error:', err.message);
+    if (err.code === 'EADDRINUSE') {
+      console.log(`Port ${port} is in use, trying ${port + 1}...`);
+      httpServer.listen(port + 1, host);
+    }
   });
 
   // Start HTTPS server if enabled

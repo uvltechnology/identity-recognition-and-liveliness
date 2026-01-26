@@ -1,13 +1,26 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-// Use the server's combined OCR + AI endpoint
-const API_URL = 'http://192.168.137.1:3000/api/ocr/base64';
+// Use local server endpoint (relative URL)
+const API_URL = '/api/ocr/base64';
+
+// ID type options with display names and icons
+const ID_TYPES = [
+  { value: 'national-id', label: 'Philippine National ID', icon: '🇵🇭' },
+  { value: 'driver-license', label: "Driver's License", icon: '🚗' },
+  { value: 'passport', label: 'Passport', icon: '✈️' },
+  { value: 'umid', label: 'UMID', icon: '🆔' },
+  { value: 'philhealth', label: 'PhilHealth ID', icon: '🏥' },
+  { value: 'tin-id', label: 'TIN ID', icon: '📋' },
+  { value: 'postal-id', label: 'Postal ID', icon: '📮' },
+  { value: 'pagibig', label: 'Pag-IBIG ID', icon: '🏠' },
+];
 
 export default function IDVerificationTest() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
 
+  const [selectedIdType, setSelectedIdType] = useState(null);
   const [cameraStarted, setCameraStarted] = useState(false);
   const [capturedImage, setCapturedImage] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -103,7 +116,7 @@ export default function IDVerificationTest() {
         body: JSON.stringify({ 
           image: base64Data, 
           type: 'identity',
-          idType: 'unknown'
+          idType: selectedIdType || 'unknown'
         })
       }, 30000);
       
@@ -143,6 +156,7 @@ export default function IDVerificationTest() {
     setAiResult(null);
     setOpenaiResult(null);
     setVerificationComplete(false);
+    setSelectedIdType(null);
     setFeedback('Press Start to scan your ID');
     setFeedbackType('info');
     setIsProcessing(false);
@@ -157,6 +171,84 @@ export default function IDVerificationTest() {
       </div>
     );
   };
+
+  // Get label for selected ID type
+  const getIdTypeLabel = (value) => {
+    const found = ID_TYPES.find(t => t.value === value);
+    return found ? found.label : value;
+  };
+
+  // ID Type Selection View
+  if (!selectedIdType) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+        {/* Header */}
+        <div className="bg-white shadow-sm sticky top-0 z-10">
+          <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
+            <a href="/" className="p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-full transition">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </a>
+            <h1 className="font-semibold text-gray-900">ID Verification</h1>
+            <div className="w-10" />
+          </div>
+        </div>
+
+        <div className="max-w-lg mx-auto p-4 space-y-6">
+          {/* Title */}
+          <div className="text-center pt-4 pb-2">
+            <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-10 h-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Select ID Type</h2>
+            <p className="text-gray-600">Choose the type of ID you want to scan for accurate extraction</p>
+          </div>
+
+          {/* ID Type Grid */}
+          <div className="grid grid-cols-2 gap-3">
+            {ID_TYPES.map((idType) => (
+              <button
+                key={idType.value}
+                onClick={() => setSelectedIdType(idType.value)}
+                className="bg-white rounded-2xl p-4 shadow-md hover:shadow-lg hover:scale-[1.02] transition-all duration-200 text-left border-2 border-transparent hover:border-blue-500 group"
+              >
+                <div className="text-3xl mb-2">{idType.icon}</div>
+                <div className="font-semibold text-gray-900 text-sm leading-tight group-hover:text-blue-600 transition-colors">
+                  {idType.label}
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {/* Tip */}
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex gap-3">
+            <div className="text-amber-500 flex-shrink-0">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div>
+              <div className="font-semibold text-amber-800 text-sm">Why select ID type?</div>
+              <div className="text-amber-700 text-xs mt-1">
+                Each ID has different formats and fields. Selecting the correct type helps our AI extract information more accurately.
+              </div>
+            </div>
+          </div>
+
+          {/* Back Button */}
+          <a
+            href="/"
+            className="block w-full py-3 bg-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-300 transition text-center"
+          >
+            Back to Home
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   // Results View
   if (verificationComplete && capturedImage) {
@@ -334,7 +426,7 @@ export default function IDVerificationTest() {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
                 </svg>
-                ID Scanner
+                {getIdTypeLabel(selectedIdType)}
               </div>
             </div>
           </div>
@@ -411,6 +503,16 @@ export default function IDVerificationTest() {
             <span>• Keep steady</span>
             <span>• Fill frame</span>
           </div>
+        )}
+
+        {/* Change ID Type button */}
+        {!cameraStarted && (
+          <button
+            onClick={() => setSelectedIdType(null)}
+            className="w-full mt-3 py-3 bg-white/10 backdrop-blur text-white/80 font-medium rounded-xl hover:bg-white/20 transition text-sm"
+          >
+            ← Change ID Type
+          </button>
         )}
       </div>
     </div>

@@ -10,6 +10,14 @@ build/
 .env.local
 .env.*.local
 
+# Sensitive credentials
+google-cloud-key.json
+*.pem
+*.key
+
+# Certificates
+certs/
+
 # Logs
 logs/
 *.log
@@ -31,3 +39,4 @@ Thumbs.db
 # Temp files
 *.tmp
 *.temp
+temp_uploads/
