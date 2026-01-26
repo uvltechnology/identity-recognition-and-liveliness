@@ -429,7 +429,8 @@ export default function SelfieLivenessTest() {
     if (!canvas || !video) return;
 
     // Final face verification before capture
-    setFaceFeedback('📸 Final check...');
+    setFaceFeedback('� Final checking, hold on...');
+    setFaceFeedbackType('info');
     
     try {
       const finalDetection = await faceapi
@@ -603,6 +604,17 @@ export default function SelfieLivenessTest() {
 
         {/* Overlay */}
         <div className="absolute inset-0 pointer-events-none">
+          {/* Blur overlay outside oval - only show when progress starts */}
+          {faceDetectionStarted && livenessScore > 0 && (
+            <div 
+              className="absolute inset-0 backdrop-blur-md bg-black/40"
+              style={{
+                WebkitMaskImage: 'radial-gradient(ellipse 104px 144px at center, transparent 100%, black 100%)',
+                maskImage: 'radial-gradient(ellipse 104px 144px at center, transparent 100%, black 100%)',
+              }}
+            />
+          )}
+
           {/* Top gradient */}
           <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-black/60 to-transparent" />
           
