@@ -94,10 +94,10 @@ export default function SelfieLivenessTest() {
         throw new Error('Camera not available. Use HTTPS.');
       }
 
-      // Try different camera configurations with fallbacks
+      // Try different camera configurations with fallbacks - lower resolution for performance
       const cameraConfigs = [
-        { video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } },
-        { video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } },
+        { video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } } },
+        { video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 } } },
         { video: { facingMode: 'user' } },
         { video: true }
       ];
@@ -204,12 +204,19 @@ export default function SelfieLivenessTest() {
     setFaceDetectionStarted(false);
   }, []);
 
+  const isProcessingRef = useRef(false);
+
   const startLivenessDetection = () => {
     if (faceDetectionIntervalRef.current) clearInterval(faceDetectionIntervalRef.current);
     faceDetectionIntervalRef.current = setInterval(async () => {
-      if (!isRunningRef.current) return;
-      await analyzeLiveness();
-    }, 200);
+      if (!isRunningRef.current || isProcessingRef.current) return;
+      isProcessingRef.current = true;
+      try {
+        await analyzeLiveness();
+      } finally {
+        isProcessingRef.current = false;
+      }
+    }, 250); // Reduced frequency for better performance
   };
 
   const analyzeLiveness = async () => {
@@ -218,7 +225,10 @@ export default function SelfieLivenessTest() {
 
     try {
       const detections = await faceapi
-        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: MIN_FACE_CONFIDENCE }))
+        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ 
+          scoreThreshold: MIN_FACE_CONFIDENCE,
+          inputSize: 224  // Smaller input size for faster processing
+        }))
         .withFaceLandmarks()
         .withFaceExpressions();
 
@@ -547,47 +557,42 @@ export default function SelfieLivenessTest() {
       [17, 0], [26, 16],
     ];
 
-    // Draw mesh lines
+    // Draw mesh lines - batch all lines in single path for performance
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
     ctx.lineWidth = 1;
+    ctx.beginPath();
     
     meshConnections.forEach(([i, j]) => {
       if (scaledPoints[i] && scaledPoints[j]) {
-        ctx.beginPath();
         ctx.moveTo(scaledPoints[i].x, scaledPoints[i].y);
         ctx.lineTo(scaledPoints[j].x, scaledPoints[j].y);
-        ctx.stroke();
       }
     });
+    ctx.stroke();
 
-    // Draw all landmark points as dots
-    scaledPoints.forEach((point, index) => {
+    // Draw all landmark points as dots - grouped by color for performance
+    const drawPointGroup = (indices, color) => {
+      ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(point.x, point.y, 2.5, 0, 2 * Math.PI);
-      
-      // Color based on feature
-      if (index >= 36 && index <= 41) {
-        // Left eye - cyan
-        ctx.fillStyle = 'rgba(0, 255, 255, 0.9)';
-      } else if (index >= 42 && index <= 47) {
-        // Right eye - cyan
-        ctx.fillStyle = 'rgba(0, 255, 255, 0.9)';
-      } else if (index >= 27 && index <= 35) {
-        // Nose - light green
-        ctx.fillStyle = 'rgba(150, 255, 200, 0.9)';
-      } else if (index >= 48 && index <= 67) {
-        // Mouth - light pink
-        ctx.fillStyle = 'rgba(255, 200, 220, 0.9)';
-      } else if (index >= 17 && index <= 26) {
-        // Eyebrows - yellow
-        ctx.fillStyle = 'rgba(255, 255, 150, 0.9)';
-      } else {
-        // Jaw and other - white
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-      }
-      
+      indices.forEach(i => {
+        if (scaledPoints[i]) {
+          ctx.moveTo(scaledPoints[i].x + 2.5, scaledPoints[i].y);
+          ctx.arc(scaledPoints[i].x, scaledPoints[i].y, 2.5, 0, 2 * Math.PI);
+        }
+      });
       ctx.fill();
-    });
+    };
+
+    // Eyes - cyan
+    drawPointGroup([36,37,38,39,40,41,42,43,44,45,46,47], 'rgba(0, 255, 255, 0.9)');
+    // Nose - light green  
+    drawPointGroup([27,28,29,30,31,32,33,34,35], 'rgba(150, 255, 200, 0.9)');
+    // Mouth - light pink
+    drawPointGroup([48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67], 'rgba(255, 200, 220, 0.9)');
+    // Eyebrows - yellow
+    drawPointGroup([17,18,19,20,21,22,23,24,25,26], 'rgba(255, 255, 150, 0.9)');
+    // Jaw and other - white
+    drawPointGroup([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], 'rgba(255, 255, 255, 0.8)');
 
     // Draw horizontal scan line effect (like in the image)
     const scanLineY = scaledPoints[27] ? scaledPoints[27].y : canvas.height / 2;
