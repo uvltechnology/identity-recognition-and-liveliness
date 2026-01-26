@@ -1,686 +1,418 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
-const ID_TYPES = [
-  { id: 'national-id', name: 'Philippine National ID' },
-  { id: 'passport', name: 'Passport' },
-  { id: 'driver-license', name: "Driver's License" },
-  { id: 'umid', name: 'UMID' },
-  { id: 'philhealth', name: 'PhilHealth' },
-  { id: 'tin-id', name: 'TIN ID' },
-  { id: 'postal-id', name: 'Postal ID' },
-  { id: 'pagibig', name: 'Pag-IBIG' },
-];
+// Use the server's combined OCR + AI endpoint
+const API_URL = 'http://192.168.137.1:3000/api/ocr/base64';
 
 export default function IDVerificationTest() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
-  const alignmentCheckRef = useRef(null);
-  const captureTimeoutRef = useRef(null);
-  const cameraStartedRef = useRef(false);
 
   const [cameraStarted, setCameraStarted] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [capturedImage, setCapturedImage] = useState(null);
-  const [idType, setIdType] = useState('national-id');
-  const [feedbackMessage, setFeedbackMessage] = useState('Press "Start Camera" to scan your ID');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [feedback, setFeedback] = useState('Press Start to scan your ID');
   const [feedbackType, setFeedbackType] = useState('info');
-  const [ocrRawText, setOcrRawText] = useState('');
-  const [aiResults, setAiResults] = useState(null);
-  const [autoCapture, setAutoCapture] = useState(true);
-
-  const [formData, setFormData] = useState({
-    idNumber: '',
-    lastName: '',
-    firstName: '',
-    middleName: '',
-    birthDate: '',
-    address: '',
-  });
+  const [ocrResult, setOcrResult] = useState(null);
+  const [aiResult, setAiResult] = useState(null);
+  const [openaiResult, setOpenaiResult] = useState(null);
+  const [verificationComplete, setVerificationComplete] = useState(false);
 
   useEffect(() => {
-    return () => {
-      stopCamera();
-    };
+    return () => stopCamera();
   }, []);
 
   const startCamera = async () => {
     try {
-      setFeedbackMessage('Starting camera...');
-      setFeedbackType('info');
-
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Camera API not available. Please use HTTPS or localhost.');
-      }
-
-      const constraints = {
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }
-      };
-
-      const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      setFeedback('Starting camera...');
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+      });
       streamRef.current = mediaStream;
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
-        await videoRef.current.play();
+        await new Promise(resolve => {
+          videoRef.current.onloadedmetadata = () => {
+            videoRef.current.play();
+            resolve();
+          };
+        });
+        if (canvasRef.current) {
+          canvasRef.current.width = videoRef.current.videoWidth;
+          canvasRef.current.height = videoRef.current.videoHeight;
+        }
       }
 
-      cameraStartedRef.current = true;
       setCameraStarted(true);
-      setCapturedImage(null);
-      setAiResults(null);
-      setOcrRawText('');
-      setFeedbackMessage('Position your ID within the guide rectangle');
+      setFeedback('Position your ID within the frame');
       setFeedbackType('info');
-
-      if (autoCapture) {
-        startAlignmentCheck();
-      }
     } catch (err) {
       console.error('Camera error:', err);
-      setFeedbackMessage('Failed to access camera: ' + err.message);
+      setFeedback('Camera access failed: ' + err.message);
       setFeedbackType('error');
     }
   };
 
   const stopCamera = useCallback(() => {
-    cameraStartedRef.current = false;
-
-    if (alignmentCheckRef.current) {
-      clearInterval(alignmentCheckRef.current);
-      alignmentCheckRef.current = null;
-    }
-
-    if (captureTimeoutRef.current) {
-      clearTimeout(captureTimeoutRef.current);
-      captureTimeoutRef.current = null;
-    }
-
-    const streamToStop = streamRef.current;
-    if (streamToStop) {
-      streamToStop.getTracks().forEach(track => track.stop());
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
-
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-
+    if (videoRef.current) videoRef.current.srcObject = null;
     setCameraStarted(false);
   }, []);
 
-  const switchCamera = async () => {
-    const currentStream = streamRef.current;
-    if (currentStream) {
-      currentStream.getTracks().forEach(track => track.stop());
-    }
-
-    try {
-      const currentFacingMode = currentStream?.getVideoTracks()[0]?.getSettings()?.facingMode;
-      const newFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
-
-      const constraints = {
-        video: {
-          facingMode: { exact: newFacingMode },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }
-      };
-
-      const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-      streamRef.current = mediaStream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-        await videoRef.current.play();
-      }
-    } catch (err) {
-      console.error('Switch camera error:', err);
-      setFeedbackMessage('Failed to switch camera');
-      setFeedbackType('warn');
-    }
+  const fetchWithTimeout = (url, options, timeout = 15000) => {
+    return Promise.race([
+      fetch(url, options),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), timeout))
+    ]);
   };
 
-  const startAlignmentCheck = () => {
-    if (alignmentCheckRef.current) {
-      clearInterval(alignmentCheckRef.current);
-    }
-
-    let stableCount = 0;
-    const requiredStableFrames = 15;
-
-    alignmentCheckRef.current = setInterval(() => {
-      if (!cameraStartedRef.current || isProcessing) return;
-
-      const video = videoRef.current;
-      if (video && video.readyState >= 2) {
-        stableCount++;
-
-        if (stableCount >= requiredStableFrames) {
-          setFeedbackMessage('Document detected! Capturing...');
-          setFeedbackType('success');
-
-          if (captureTimeoutRef.current) {
-            clearTimeout(captureTimeoutRef.current);
-          }
-          captureTimeoutRef.current = setTimeout(() => {
-            captureImage();
-          }, 500);
-
-          clearInterval(alignmentCheckRef.current);
-          alignmentCheckRef.current = null;
-          stableCount = 0;
-        } else if (stableCount > 5) {
-          setFeedbackMessage(`Hold steady... ${Math.ceil((requiredStableFrames - stableCount) / 10)}s`);
-          setFeedbackType('info');
-        }
-      } else {
-        stableCount = 0;
-      }
-    }, 100);
-  };
-
-  const captureImage = useCallback(async () => {
-    const video = videoRef.current;
+  const captureID = async () => {
     const canvas = canvasRef.current;
-
-    if (!video || !canvas || isProcessing) return;
+    const video = videoRef.current;
+    if (!canvas || !video) return;
 
     setIsProcessing(true);
-    setFeedbackMessage('Processing...');
-    setFeedbackType('info');
+    setFeedback('Capturing...');
+
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+    // Lower quality for faster processing
+    const imageDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+
+    setCapturedImage(imageDataUrl);
+    stopCamera();
+
+    await processImage(imageDataUrl);
+  };
+
+  const processImage = async (imageDataUrl) => {
+    const base64Data = imageDataUrl.split(',')[1];
 
     try {
-      const ctx = canvas.getContext('2d');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      setFeedback('Processing ID...');
+      setFeedbackType('info');
 
-      const imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
-      setCapturedImage(imageDataUrl);
-
-      stopCamera();
-      await processOCR(imageDataUrl);
-    } catch (err) {
-      console.error('Capture error:', err);
-      setFeedbackMessage('Failed to capture image');
-      setFeedbackType('error');
-      setIsProcessing(false);
-    }
-  }, [isProcessing, stopCamera]);
-
-  const processOCR = async (imageDataUrl) => {
-    try {
-      setFeedbackMessage('Sending to OCR service...');
-
-      const response = await fetch('http://192.168.137.1:3000/api/ocr/base64', {
+      // Single API call - server handles OCR + Gemini + OpenAI extraction
+      const res = await fetchWithTimeout(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: imageDataUrl,
+        body: JSON.stringify({ 
+          image: base64Data, 
           type: 'identity',
-        }),
-      });
+          idType: 'unknown'
+        })
+      }, 30000);
+      
+      const data = await res.json();
+      
+      if (!data.success) throw new Error(data.error || 'Processing failed');
 
-      if (!response.ok) {
-        throw new Error(`OCR API error: ${response.status}`);
+      // Store results
+      setOcrResult({ text: data.rawText || data.basicText?.text || '' });
+      setAiResult({ data: data.fields || {} });
+      if (data.openai?.parsed) {
+        setOpenaiResult(data.openai.parsed);
       }
 
-      const ocrResult = await response.json();
-      console.log('OCR Result:', ocrResult);
-
-      const extractedText = ocrResult.rawText ||
-        ocrResult.text ||
-        ocrResult.basicText?.text ||
-        ocrResult.structuredText?.text;
-
-      if (ocrResult.success && extractedText) {
-        setOcrRawText(extractedText);
-        setFeedbackMessage('OCR complete. Extracting fields...');
-
-        if (ocrResult.fields) {
-          setFormData((prev) => ({
-            ...prev,
-            firstName: ocrResult.fields.firstName || prev.firstName,
-            lastName: ocrResult.fields.lastName || prev.lastName,
-            idNumber: ocrResult.fields.idNumber || prev.idNumber,
-          }));
-        }
-
-        await extractFields(extractedText);
-      } else {
-        setFeedbackMessage('OCR failed: ' + (ocrResult.error || 'No text extracted'));
-        setFeedbackType('error');
-        setIsProcessing(false);
-      }
+      setFeedback('Done!');
+      setFeedbackType('success');
+      setVerificationComplete(true);
     } catch (err) {
-      console.error('OCR error:', err);
-      setFeedbackMessage('OCR processing failed: ' + err.message);
+      console.error('Processing error:', err);
+      setFeedback('Failed: ' + err.message);
       setFeedbackType('error');
       setIsProcessing(false);
     }
   };
 
-  const extractFields = async (rawText) => {
-    try {
-      const endpointMap = {
-        'national-id': '/api/ai/national-id/parse',
-        passport: '/api/ai/passport/parse',
-        'driver-license': '/api/ai/driver-license/parse',
-        umid: '/api/ai/umid/parse',
-        philhealth: '/api/ai/philhealth/parse',
-        'tin-id': '/api/ai/tin-id/parse',
-        'postal-id': '/api/ai/postal-id/parse',
-        pagibig: '/api/ai/pagibig/parse',
-      };
-
-      const endpoint = endpointMap[idType];
-      if (!endpoint) {
-        setFeedbackMessage('Extraction complete (no AI endpoint for this ID type)');
-        setFeedbackType('warn');
-        setIsProcessing(false);
-        return;
-      }
-
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rawText }),
-      });
-
-      const result = await response.json();
-      console.log('AI Extraction Result:', result);
-
-      if (result.success && result.fields) {
-        setAiResults(result);
-
-        setFormData((prev) => ({
-          ...prev,
-          firstName: result.fields.firstName || prev.firstName,
-          lastName: result.fields.lastName || prev.lastName,
-          middleName: result.fields.middleName || prev.middleName,
-          idNumber: result.fields.idNumber || prev.idNumber,
-          birthDate: result.fields.birthDate || prev.birthDate,
-          address: result.fields.address || prev.address,
-        }));
-
-        setFeedbackMessage('✓ ID verification complete');
-        setFeedbackType('success');
-      } else {
-        setAiResults({ error: result.error });
-        setFeedbackMessage('AI extraction failed: ' + (result.error || 'Unknown error'));
-        setFeedbackType('warn');
-      }
-    } catch (err) {
-      console.error('AI extraction error:', err);
-      setAiResults({ error: err.message });
-      setFeedbackMessage('AI extraction failed');
-      setFeedbackType('warn');
-    } finally {
-      setIsProcessing(false);
-    }
+  const downloadImage = () => {
+    if (!capturedImage) return;
+    const link = document.createElement('a');
+    link.href = capturedImage;
+    link.download = `id-scan-${Date.now()}.jpg`;
+    link.click();
   };
 
-  const resetCapture = () => {
+  const resetAll = () => {
     setCapturedImage(null);
-    setAiResults(null);
-    setOcrRawText('');
-    setFormData({
-      idNumber: '',
-      lastName: '',
-      firstName: '',
-      middleName: '',
-      birthDate: '',
-      address: '',
-    });
-    setFeedbackMessage('Press "Start Camera" to scan your ID');
+    setOcrResult(null);
+    setAiResult(null);
+    setOpenaiResult(null);
+    setVerificationComplete(false);
+    setFeedback('Press Start to scan your ID');
     setFeedbackType('info');
+    setIsProcessing(false);
   };
 
-  const manualCapture = () => {
-    if (alignmentCheckRef.current) {
-      clearInterval(alignmentCheckRef.current);
-      alignmentCheckRef.current = null;
-    }
-    captureImage();
+  const renderField = (label, value) => {
+    if (!value) return null;
+    return (
+      <div className="flex justify-between py-2 border-b border-gray-100 last:border-0">
+        <span className="text-gray-500 text-sm">{label}</span>
+        <span className="text-gray-900 font-medium text-sm text-right max-w-[60%]">{value}</span>
+      </div>
+    );
   };
 
-  const handleFormChange = (field, value) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
-  };
+  // Results View
+  if (verificationComplete && capturedImage) {
+    const data = aiResult?.data || aiResult || {};
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-green-50">
+        {/* Header */}
+        <div className="bg-white shadow-sm sticky top-0 z-10">
+          <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
+            <a href="/" className="p-2 -ml-2 text-gray-600">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </a>
+            <h1 className="font-semibold text-gray-900">ID Verification Result</h1>
+            <div className="w-10" />
+          </div>
+        </div>
 
+        <div className="max-w-lg mx-auto p-4 space-y-4">
+          {/* Success Badge */}
+          <div className="bg-green-500 text-white rounded-2xl p-4 flex items-center gap-4">
+            <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div>
+              <div className="font-bold text-lg">Verification Complete</div>
+              <div className="text-white/80 text-sm">ID document processed successfully</div>
+            </div>
+          </div>
+
+          {/* Captured ID Image */}
+          <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+            <img src={capturedImage} alt="Scanned ID" className="w-full aspect-video object-contain bg-gray-100" />
+          </div>
+
+          {/* Extracted Info */}
+          <div className="bg-white rounded-2xl shadow-lg p-4">
+            <h2 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+              <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              Extracted Information
+            </h2>
+            <div className="divide-y divide-gray-100">
+              {renderField('ID Type', data.idType)}
+              {renderField('Full Name', data.fullName || data.name)}
+              {renderField('First Name', data.firstName)}
+              {renderField('Middle Name', data.middleName)}
+              {renderField('Last Name', data.lastName)}
+              {renderField('ID Number', data.idNumber)}
+              {renderField('Date of Birth', data.dateOfBirth || data.birthDate)}
+              {renderField('Sex', data.sex)}
+              {renderField('Address', data.address)}
+              {renderField('Nationality', data.nationality)}
+              {renderField('Expiry Date', data.expiryDate)}
+              {renderField('Issue Date', data.issueDate)}
+            </div>
+          </div>
+
+          {/* OCR Raw Text */}
+          {ocrResult?.text && (
+            <details className="bg-white rounded-2xl shadow-lg">
+              <summary className="p-4 cursor-pointer font-bold text-gray-900 flex items-center gap-2">
+                <svg className="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Raw OCR Text
+              </summary>
+              <div className="px-4 pb-4">
+                <pre className="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 whitespace-pre-wrap overflow-x-auto max-h-40">
+                  {ocrResult.text}
+                </pre>
+              </div>
+            </details>
+          )}
+
+          {/* OpenAI Result */}
+          {openaiResult && (
+            <details className="bg-white rounded-2xl shadow-lg">
+              <summary className="p-4 cursor-pointer font-bold text-gray-900 flex items-center gap-2">
+                <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+                OpenAI Extraction
+              </summary>
+              <div className="px-4 pb-4">
+                <pre className="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 whitespace-pre-wrap overflow-x-auto max-h-40">
+                  {JSON.stringify(openaiResult, null, 2)}
+                </pre>
+              </div>
+            </details>
+          )}
+
+          {/* Actions */}
+          <div className="space-y-3 pt-2">
+            <button
+              onClick={downloadImage}
+              className="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Download ID Image
+            </button>
+            <button
+              onClick={resetAll}
+              className="w-full py-3 bg-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-300 transition"
+            >
+              Scan Another ID
+            </button>
+            <a
+              href="/"
+              className="block w-full py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition text-center"
+            >
+              Done
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Camera View (Full Page)
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="w-full border-b border-gray-200 bg-white">
-        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            ID Document Verification
-          </h1>
-          <p className="mt-2 text-sm text-gray-600">
-            Scan your identity document to extract information using OCR and AI
-          </p>
-        </div>
-      </header>
+    <div className="fixed inset-0 bg-black flex flex-col">
+      {/* Camera */}
+      <div className="flex-1 relative">
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          className="absolute inset-0 w-full h-full object-cover"
+        />
+        <canvas ref={canvasRef} className="hidden" />
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* Left: Camera + Controls */}
-          <div className="space-y-4">
-            {/* Camera Container */}
-            <div className="relative overflow-hidden rounded-xl border border-gray-200 bg-black shadow-sm">
-              {!capturedImage ? (
-                <>
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    muted
-                    playsInline
-                    className="h-64 w-full object-cover sm:h-72 md:h-80 lg:h-96"
-                  />
-                  <canvas ref={canvasRef} className="hidden" />
+        {/* Overlay */}
+        <div className="absolute inset-0 pointer-events-none">
+          {/* Top gradient */}
+          <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-black/60 to-transparent" />
+          
+          {/* Bottom gradient */}
+          <div className="absolute bottom-0 left-0 right-0 h-48 bg-gradient-to-t from-black/80 to-transparent" />
 
-                  {/* Guide rectangle overlay */}
-                  {cameraStarted && (
-                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                      <div className="relative w-[85%] h-[60%] rounded-xl border-2 border-dashed border-white/70">
-                        {/* Corner markers */}
-                        <div className="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-white rounded-tl-lg" />
-                        <div className="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-white rounded-tr-lg" />
-                        <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-white rounded-bl-lg" />
-                        <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-white rounded-br-lg" />
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <img
-                  src={capturedImage}
-                  alt="Captured ID"
-                  className="h-64 w-full object-contain sm:h-72 md:h-80 lg:h-96"
-                />
-              )}
-
-              {/* Feedback message */}
+          {/* ID guide rectangle */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="relative">
               <div
-                className={`absolute bottom-3 left-1/2 -translate-x-1/2 rounded-lg px-4 py-2 text-sm font-medium w-[94%] text-center ${
-                  feedbackType === 'success'
-                    ? 'bg-green-600 text-white'
-                    : feedbackType === 'error'
-                    ? 'bg-red-600 text-white'
-                    : feedbackType === 'warn'
-                    ? 'bg-yellow-500 text-black'
-                    : 'bg-black/70 text-white'
+                className={`w-80 h-52 sm:w-96 sm:h-60 border-4 rounded-2xl transition-all duration-300 ${
+                  capturedImage
+                    ? 'border-green-500 shadow-[0_0_40px_rgba(34,197,94,0.5)]'
+                    : 'border-white/70 border-dashed'
                 }`}
-              >
-                {feedbackMessage}
-              </div>
+              />
+              {/* Corner markers */}
+              <div className="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-white rounded-tl-lg" />
+              <div className="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-white rounded-tr-lg" />
+              <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-white rounded-bl-lg" />
+              <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-white rounded-br-lg" />
             </div>
+          </div>
 
-            {/* Controls */}
-            <div className="flex flex-wrap items-center gap-3">
-              {!cameraStarted && !capturedImage && (
-                <button
-                  onClick={startCamera}
-                  className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700"
-                >
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                  Start Camera
-                </button>
-              )}
-
-              {cameraStarted && (
-                <>
-                  <button
-                    onClick={switchCamera}
-                    className="inline-flex items-center justify-center rounded-md bg-gray-700 px-4 py-2 text-sm font-medium text-white shadow hover:bg-gray-800"
-                  >
-                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    Switch Camera
-                  </button>
-                  <button
-                    onClick={manualCapture}
-                    disabled={isProcessing}
-                    className="inline-flex items-center justify-center rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-green-700 disabled:opacity-50"
-                  >
-                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    Capture Now
-                  </button>
-                  <button
-                    onClick={stopCamera}
-                    className="inline-flex items-center justify-center rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-red-700"
-                  >
-                    Stop
-                  </button>
-                </>
-              )}
-
-              {capturedImage && !isProcessing && (
-                <button
-                  onClick={resetCapture}
-                  className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700"
-                >
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  Recapture
-                </button>
-              )}
-
-              {isProcessing && (
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
-                  Processing image...
-                </div>
-              )}
-            </div>
-
-            {/* Settings */}
-            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-600">ID Type</label>
-                  <select
-                    value={idType}
-                    onChange={(e) => setIdType(e.target.value)}
-                    className="block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  >
-                    {ID_TYPES.map((type) => (
-                      <option key={type.id} value={type.id}>
-                        {type.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-center">
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={autoCapture}
-                      onChange={(e) => setAutoCapture(e.target.checked)}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    Auto-capture when stable
-                  </label>
-                </div>
+          {/* Top info */}
+          <div className="absolute top-4 left-4 right-4 pointer-events-auto">
+            <div className="flex items-center justify-between">
+              <a href="/" className="p-2 bg-white/20 backdrop-blur rounded-full">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </a>
+              <div className="px-3 py-1 bg-blue-500/80 backdrop-blur rounded-full text-white text-xs font-medium flex items-center gap-1">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
+                </svg>
+                ID Scanner
               </div>
             </div>
           </div>
 
-          {/* Right: Results Section */}
-          <div className="space-y-4">
-            {/* Extracted Details Form */}
-            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-              <h3 className="text-base font-medium">Extracted Details</h3>
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-600">ID Type</label>
-                  <select
-                    value={idType}
-                    onChange={(e) => setIdType(e.target.value)}
-                    className="block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  >
-                    {ID_TYPES.map((type) => (
-                      <option key={type.id} value={type.id}>
-                        {type.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-600">ID Number</label>
-                  <input
-                    type="text"
-                    value={formData.idNumber}
-                    onChange={(e) => handleFormChange('idNumber', e.target.value)}
-                    placeholder="Auto-filled from OCR"
-                    className="block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-600">Last Name</label>
-                  <input
-                    type="text"
-                    value={formData.lastName}
-                    onChange={(e) => handleFormChange('lastName', e.target.value)}
-                    placeholder="Apelyido / Last Name"
-                    className="block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-600">First Name</label>
-                  <input
-                    type="text"
-                    value={formData.firstName}
-                    onChange={(e) => handleFormChange('firstName', e.target.value)}
-                    placeholder="Mga Pangalan / Given Names"
-                    className="block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-600">Middle Name</label>
-                  <input
-                    type="text"
-                    value={formData.middleName}
-                    onChange={(e) => handleFormChange('middleName', e.target.value)}
-                    placeholder="Gitnang Apelyido / Middle Name"
-                    className="block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-600">Birth Date</label>
-                  <input
-                    type="text"
-                    value={formData.birthDate}
-                    onChange={(e) => handleFormChange('birthDate', e.target.value)}
-                    placeholder="Petsa ng Kapanganakan"
-                    className="block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  />
-                </div>
+          {/* Instructions */}
+          {cameraStarted && !capturedImage && (
+            <div className="absolute top-20 left-6 right-6 text-center">
+              <div className="text-white/80 text-sm">
+                Align your ID card within the frame
               </div>
             </div>
+          )}
+        </div>
 
-            {/* Captured Image Preview */}
-            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-              <h3 className="text-base font-medium">Captured Image</h3>
-              <div className="mt-3 flex min-h-[160px] items-center justify-center overflow-hidden rounded-lg bg-gray-50">
-                {capturedImage ? (
-                  <img
-                    src={capturedImage}
-                    alt="Captured ID"
-                    className="max-h-80 w-auto max-w-full object-contain"
-                  />
-                ) : (
-                  <div className="text-sm text-gray-500">No image captured yet</div>
-                )}
-              </div>
-            </div>
-
-            {/* OCR Results */}
-            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-              <h3 className="text-base font-medium">OCR Results</h3>
-              <div className="mt-3 max-h-[22rem] overflow-auto rounded-md bg-gray-50 p-3 text-sm text-gray-800">
-                {ocrRawText ? (
-                  <pre className="whitespace-pre-wrap text-xs">{ocrRawText}</pre>
-                ) : (
-                  <div className="text-gray-500">Process an image to see OCR results</div>
-                )}
-              </div>
-            </div>
-
-            {/* AI Results */}
-            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-              <h3 className="text-base font-medium">AI Results</h3>
-              <div className="mt-3 rounded-md bg-gray-50 p-3 text-sm text-gray-800">
-                {aiResults ? (
-                  <div className="space-y-2">
-                    {aiResults.success ? (
-                      <>
-                        <div className="flex items-center gap-2 text-green-600">
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                          </svg>
-                          <span className="font-medium">AI Extraction Successful</span>
-                        </div>
-                        <pre className="text-xs whitespace-pre-wrap bg-white p-2 rounded border">
-                          {JSON.stringify(aiResults.fields, null, 2)}
-                        </pre>
-                        {aiResults.confidence && (
-                          <div className="text-xs text-gray-600">
-                            Confidence: {Math.round(aiResults.confidence * 100)}%
-                            {aiResults.modelUsed && ` • Model: ${aiResults.modelUsed}`}
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <div className="text-red-600">
-                        Error: {aiResults.error || 'Unknown error'}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-gray-500">
-                    AI will display extracted fields here when available.
-                  </div>
-                )}
-              </div>
+        {/* Processing overlay */}
+        {isProcessing && (
+          <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-20">
+            <div className="text-center">
+              <div className="w-16 h-16 border-4 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-4" />
+              <div className="text-white font-medium">{feedback}</div>
             </div>
           </div>
+        )}
+      </div>
+
+      {/* Bottom Controls */}
+      <div className="relative z-10 px-6 pb-8 pt-4">
+        {/* Feedback */}
+        <div
+          className={`mb-4 py-3 px-4 rounded-xl text-center font-medium ${
+            feedbackType === 'success' ? 'bg-green-500 text-white'
+            : feedbackType === 'error' ? 'bg-red-500 text-white'
+            : feedbackType === 'warning' ? 'bg-yellow-500 text-black'
+            : 'bg-white/20 backdrop-blur text-white'
+          }`}
+        >
+          {feedback}
         </div>
 
-        {/* Navigation */}
-        <div className="mt-6 flex justify-between">
-          <a
-            href="/"
-            className="inline-flex items-center text-sm text-gray-600 hover:text-gray-900"
+        {/* Buttons */}
+        {!cameraStarted ? (
+          <button
+            onClick={startCamera}
+            className="w-full py-4 bg-white text-black font-bold text-lg rounded-2xl hover:bg-gray-100 transition"
           >
-            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            Back to Home
-          </a>
-          <a
-            href="/selfie-liveness-test"
-            className="inline-flex items-center text-sm text-blue-600 hover:text-blue-800 font-medium"
-          >
-            Go to Face Verification
-            <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-            </svg>
-          </a>
-        </div>
-      </main>
+            Start Camera
+          </button>
+        ) : (
+          <div className="flex gap-3">
+            <button
+              onClick={stopCamera}
+              className="flex-1 py-4 bg-red-500/80 text-white font-bold rounded-2xl hover:bg-red-600 transition"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={captureID}
+              disabled={isProcessing}
+              className="flex-[2] py-4 bg-white text-black font-bold text-lg rounded-2xl hover:bg-gray-100 transition disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              Capture
+            </button>
+          </div>
+        )}
+
+        {/* Tips */}
+        {cameraStarted && (
+          <div className="flex justify-center gap-4 mt-4 text-white/60 text-xs">
+            <span>• Good lighting</span>
+            <span>• Keep steady</span>
+            <span>• Fill frame</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

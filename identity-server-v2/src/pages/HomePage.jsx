@@ -13,12 +13,24 @@ export default function HomePage() {
         </p>
         
         {/* Quick Actions */}
-        <div className="flex justify-center gap-4 mb-8">
+        <div className="flex flex-wrap justify-center gap-4 mb-8">
           <Link
             to="/id-verification-test"
             className="inline-flex items-center justify-center rounded-md bg-blue-600 px-6 py-3 text-sm font-medium text-white shadow hover:bg-blue-700"
           >
             🪪 ID Verification Test
+          </Link>
+          <Link
+            to="/selfie-liveness-test"
+            className="inline-flex items-center justify-center rounded-md bg-purple-600 px-6 py-3 text-sm font-medium text-white shadow hover:bg-purple-700"
+          >
+            🤳 Selfie Liveness Test
+          </Link>
+          <Link
+            to="/docs"
+            className="inline-flex items-center justify-center rounded-md bg-gray-600 px-6 py-3 text-sm font-medium text-white shadow hover:bg-gray-700"
+          >
+            📚 API Documentation
           </Link>
         </div>
 
@@ -44,6 +56,14 @@ export default function HomePage() {
             <li>
               <Link to="/id-verification-test" className="text-blue-600 hover:underline">/id-verification-test</Link>
               {' - '}ID scanning demo
+            </li>
+            <li>
+              <Link to="/selfie-liveness-test" className="text-blue-600 hover:underline">/selfie-liveness-test</Link>
+              {' - '}Selfie liveness detection
+            </li>
+            <li>
+              <Link to="/docs" className="text-blue-600 hover:underline">/docs</Link>
+              {' - '}API Documentation
             </li>
             <li>
               <Link to="/embed/session/demo-123" className="text-blue-600 hover:underline">/embed/session/:id</Link>
