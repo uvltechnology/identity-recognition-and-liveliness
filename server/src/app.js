@@ -167,6 +167,21 @@ app.use('/json', express.static(path.join(__dirname, 'json')));
 // routes
 app.get('/health', (req, res) => res.json({ ok: true }));
 
+// Return list of supported ID types
+app.get('/api/ids', (req, res) => {
+  const ids = [
+    { id: 'national-id', name: 'National ID' },
+    { id: 'passport', name: 'Passport' },
+    { id: 'umid', name: 'UMID' },
+    { id: 'tin-id', name: 'TIN' },
+    { id: 'philhealth', name: 'PhilHealth' },
+    { id: 'pagibig', name: 'Pag-IBIG' },
+    { id: 'postal-id', name: 'Postal ID' },
+    { id: 'driver-license', name: "Driver's License" }
+  ];
+  res.json({ success: true, ids });
+});
+
 // AI extraction endpoint for Driver's License (Gemini first)
 app.post('/api/ai/driver-license/parse', async (req, res) => {
   try {
@@ -1054,6 +1069,61 @@ app.get('/embed/session/:id', async (req, res) => {
                           } catch (e) { /* ignore message handler errors */ }
                         });
                       } catch (e) { /* ignore */ }
+                      // Small in-iframe problem alert UI and helpers
+                      try {
+                        window.reportCaptureProblem = function(message, level = 'warn') {
+                          try {
+                            // create alert container if missing
+                            if (!document.getElementById('problemAlert')) {
+                              const html = '\n                                <div id="problemAlert" style="position:fixed; right:12px; top:12px; z-index:999999; display:none; max-width:360px;">\n                                  <div id="problemAlertBox" style="background:#fff7ed;color:#92400e;padding:12px;border-radius:8px;box-shadow:0 10px 40px rgba(2,6,23,0.15);">\n                                    <strong id="problemAlertTitle" style="display:block;margin-bottom:6px;">Notice</strong>\n                                    <div id="problemAlertMsg" style="font-size:13px;line-height:1.25;">Problem message</div>\n                                  </div>\n                                </div>';
+                              document.body.insertAdjacentHTML('beforeend', html);
+                            }
+                            const el = document.getElementById('problemAlert');
+                            const box = document.getElementById('problemAlertBox');
+                            const msgEl = document.getElementById('problemAlertMsg');
+                            const title = document.getElementById('problemAlertTitle');
+                            if (!el || !box || !msgEl) return;
+                            title.textContent = (level === 'error') ? 'Error' : 'Notice';
+                            msgEl.textContent = message || 'An issue occurred during capture.';
+                            if (level === 'error') {
+                              box.style.background = '#fee2e2';
+                              box.style.color = '#991b1b';
+                            } else {
+                              box.style.background = '#fff7ed';
+                              box.style.color = '#92400e';
+                            }
+                            el.style.display = 'block';
+                            // notify parent when embedded
+                            try {
+                              if (window.parent && window.parent !== window) {
+                                const payload = { identityOCR: { action: 'problem', message, level, session: window.__IDENTITY_SESSION__ } };
+                                const targetOrigin = window.__IDENTITY_EXPECTED_ORIGIN__ || '*';
+                                window.parent.postMessage(payload, targetOrigin);
+                              }
+                            } catch (e) { /* ignore */ }
+                            // auto-hide after 6s
+                            if (window.__identity_problem_timeout__) clearTimeout(window.__identity_problem_timeout__);
+                            window.__identity_problem_timeout__ = setTimeout(() => { try { el.style.display = 'none'; } catch(e){} }, 6000);
+                          } catch (e) { /* ignore */ }
+                        };
+
+                        window.clearCaptureProblem = function(){ try { const el = document.getElementById('problemAlert'); if(el) el.style.display='none'; if(window.__identity_problem_timeout__) clearTimeout(window.__identity_problem_timeout__); } catch(e){} };
+                      } catch (e) { /* ignore */ }
+                      // Mirror console warnings/errors to the in-iframe alert UI
+                      try {
+                        (function(){
+                          const origWarn = console.warn && console.warn.bind(console);
+                          const origError = console.error && console.error.bind(console);
+                          console.warn = function(...args){
+                            try { if (typeof window.reportCaptureProblem === 'function') window.reportCaptureProblem(args.map(a=>String(a)).join(' '), 'warn'); } catch(e){}
+                            if (origWarn) origWarn(...args);
+                          };
+                          console.error = function(...args){
+                            try { if (typeof window.reportCaptureProblem === 'function') window.reportCaptureProblem(args.map(a=>String(a)).join(' '), 'error'); } catch(e){}
+                            if (origError) origError(...args);
+                          };
+                        })();
+                      } catch (e) { /* ignore */ }
                     });
                   </script>
                 </div>
@@ -1132,27 +1202,20 @@ async function postSessionResultHandler(req, res) {
     const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 60 * 60);
     await setSession(id, updated, ttl);
 
-    // Attempt to enrich payload with temporary captured image (if any)
+    // Attempt to enrich payload with temporary captured image/ocr stored in the session payload
     let imageRef = null;
     let imageUrl = null;
     let imageData = null;
     let tempOcr = null;
     try {
-      if (useRedis && redisClient) {
-        try {
-          const rawRef = await redisClient.get(`verify:image_ref:${id}`);
-          imageRef = rawRef ? JSON.parse(rawRef) : null;
-          const rawOcr = await redisClient.get(`verify:ocr:${id}`);
-          tempOcr = rawOcr ? JSON.parse(rawOcr) : null;
-        } catch (e) { console.warn('[identity] redis read temp failed', e); }
-      }
-      if (!imageRef) {
-        imageRef = (existing.payload && existing.payload.tempImageRef) ? existing.payload.tempImageRef : null;
-        tempOcr = tempOcr || ((existing.payload && existing.payload.tempOcr) ? existing.payload.tempOcr : null);
+      // Prefer temp data stored on the session payload. sessionStore handles persistence (in-memory or Redis) internally.
+      if (existing && existing.payload) {
+        imageRef = existing.payload.tempImageRef || null;
+        tempOcr = existing.payload.tempOcr || null;
       }
 
       // If no captured image but session is in testMode, provide a sample image for review
-      if (!imageRef && existing.payload && existing.payload.testMode) {
+      if (!imageRef && existing && existing.payload && existing.payload.testMode) {
         try {
           const origin = req.protocol + '://' + req.get('host');
           imageRef = {
@@ -1240,22 +1303,13 @@ app.get('/api/verify/session/:id/temp', async (req, res) => {
   try {
     const id = String(req.params.id || '');
     if (!id) return res.status(400).json({ success: false, error: 'Missing session id' });
+    // Read temp image and OCR from session payload (no direct Redis dependency)
     let imageRef = null;
     let ocr = null;
-    if (useRedis && redisClient) {
-      try {
-        const rawRef = await redisClient.get(`verify:image_ref:${id}`);
-        imageRef = rawRef ? JSON.parse(rawRef) : null;
-        const raw = await redisClient.get(`verify:ocr:${id}`);
-        ocr = raw ? JSON.parse(raw) : null;
-      } catch (e) { console.warn('[identity] redis read temp failed', e); }
-    }
-    if (!imageRef) {
-      const sess = await getSession(id);
-      if (sess && sess.payload) {
-        imageRef = sess.payload.tempImageRef || null;
-        ocr = sess.payload.tempOcr || null;
-      }
+    const sess = await getSession(id);
+    if (sess && sess.payload) {
+      imageRef = sess.payload.tempImageRef || null;
+      ocr = sess.payload.tempOcr || null;
     }
 
     // Resolve image URL (S3 presign or local URL) via storage helper
@@ -1441,27 +1495,16 @@ app.post('/api/ocr/base64', async (req, res) => {
               });
             } catch (e) { /* ignore logging errors */ }
 
-            if (useRedis && redisClient) {
-              try {
-                if (imageRef) await redisClient.set(`verify:image_ref:${sid}`, JSON.stringify(imageRef), { EX: ttlSeconds });
-                await redisClient.set(`verify:ocr:${sid}`, JSON.stringify(result || {}), { EX: ttlSeconds });
-                console.info('[identity] stored imageRef+ocr for session in redis', sid);
-              } catch (e) {
-                console.warn('[identity] redis store failed, falling back to session payload', e && e.message ? e.message : e);
-                const existing = await getSession(sid);
-                if (existing) {
-                  const upd = { ...(existing.payload || {}), tempImageRef: imageRef, tempOcr: result };
-                  existing.payload = upd;
-                  await setSession(sid, existing, ttlSeconds);
-                }
-              }
-            } else {
+            try {
+              // Persist temp image reference and OCR into the session payload
               const existing = await getSession(sid);
               if (existing) {
                 const upd = { ...(existing.payload || {}), tempImageRef: imageRef, tempOcr: result };
                 existing.payload = upd;
                 await setSession(sid, existing, ttlSeconds);
               }
+            } catch (e) {
+              console.warn('[identity] failed to persist temp image/ocr to session payload', e && e.message ? e.message : e);
             }
 
 
