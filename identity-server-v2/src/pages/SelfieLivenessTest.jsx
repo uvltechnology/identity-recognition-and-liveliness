@@ -8,6 +8,10 @@ const REQUIRED_CENTERED_FRAMES = 20;
 const MAX_FRAME_HISTORY = 30;
 const MIN_FACE_CONFIDENCE = 0.5;
 
+// Face size thresholds (relative to video dimensions)
+const MIN_FACE_SIZE_RATIO = 0.25;  // Face should be at least 25% of video height
+const MAX_FACE_SIZE_RATIO = 0.55;  // Face should be at most 55% of video height
+
 // Anti-spoofing thresholds
 const MIN_MICRO_MOVEMENT = 0.5;       // Minimum natural micro-movements (real faces are never perfectly still)
 const MAX_STATIC_FRAMES = 8;          // Max frames without micro-movement before flagging as photo
@@ -46,6 +50,9 @@ export default function SelfieLivenessTest() {
   const [steadySeconds, setSteadySeconds] = useState(0);
   const [isCentered, setIsCentered] = useState(false);
   const [currentExpression, setCurrentExpression] = useState('');
+  const [faceLandmarks, setFaceLandmarks] = useState(null);
+  const [faceBox, setFaceBox] = useState(null);
+  const overlayCanvasRef = useRef(null);
 
   useEffect(() => {
     return () => stopFaceDetection();
@@ -126,6 +133,10 @@ export default function SelfieLivenessTest() {
         if (faceCanvasRef.current) {
           faceCanvasRef.current.width = faceVideoRef.current.videoWidth;
           faceCanvasRef.current.height = faceVideoRef.current.videoHeight;
+        }
+        if (overlayCanvasRef.current) {
+          overlayCanvasRef.current.width = faceVideoRef.current.videoWidth;
+          overlayCanvasRef.current.height = faceVideoRef.current.videoHeight;
         }
       }
 
@@ -218,6 +229,9 @@ export default function SelfieLivenessTest() {
         setLivenessScore(Math.round(livenessScoreRef.current));
         setIsCentered(false);
         centeredFrameCountRef.current = 0;
+        setFaceLandmarks(null);
+        setFaceBox(null);
+        clearOverlayCanvas();
         return;
       }
 
@@ -225,6 +239,16 @@ export default function SelfieLivenessTest() {
       const box = detection.box;
       const dominantExpression = Object.entries(expressions).reduce((a, b) => a[1] > b[1] ? a : b);
       setCurrentExpression(dominantExpression[0]);
+      
+      // Store landmarks and box for drawing
+      setFaceBox(box);
+      setFaceLandmarks(landmarks);
+      // Only draw landmarks when progress has started
+      if (livenessScoreRef.current > 0) {
+        drawFaceLandmarks(landmarks, box);
+      } else {
+        clearOverlayCanvas();
+      }
 
       const faceCenterX = box.x + box.width / 2;
       const faceCenterY = box.y + box.height / 2;
@@ -237,6 +261,12 @@ export default function SelfieLivenessTest() {
       const offsetY = Math.abs(faceCenterY - videoCenterY) / videoHeight;
       const faceIsCentered = offsetX < CENTER_TOLERANCE && offsetY < CENTER_TOLERANCE;
       setIsCentered(faceIsCentered);
+
+      // Check face size (distance from camera)
+      const faceSizeRatio = box.height / videoHeight;
+      const isTooClose = faceSizeRatio > MAX_FACE_SIZE_RATIO;
+      const isTooFar = faceSizeRatio < MIN_FACE_SIZE_RATIO;
+      const faceIsProperSize = !isTooClose && !isTooFar;
 
       let movement = 0;
       if (lastFacePositionRef.current) {
@@ -387,6 +417,12 @@ export default function SelfieLivenessTest() {
           setFaceFeedback(faceCenterY < videoCenterY ? '↓ Move face down' : '↑ Move face up');
         }
         setFaceFeedbackType('warning');
+      } else if (isTooClose) {
+        setFaceFeedback('📏 Move back, too close');
+        setFaceFeedbackType('warning');
+      } else if (isTooFar) {
+        setFaceFeedback('📏 Move closer to camera');
+        setFaceFeedbackType('warning');
       } else if (spoofDetectedRef.current) {
         // Anti-spoofing feedback
         if (staticFrameCountRef.current > MAX_STATIC_FRAMES) {
@@ -401,7 +437,7 @@ export default function SelfieLivenessTest() {
       } else if (score < LIVENESS_REQUIRED_SCORE) {
         setFaceFeedback('🔄 Keep looking at the camera...');
         setFaceFeedbackType('info');
-      } else if (centeredFrameCountRef.current >= REQUIRED_CENTERED_FRAMES && blinkDetectedRef.current && !spoofDetectedRef.current) {
+      } else if (centeredFrameCountRef.current >= REQUIRED_CENTERED_FRAMES && blinkDetectedRef.current && !spoofDetectedRef.current && faceIsProperSize) {
         setFaceFeedback('📸 Perfect! Capturing...');
         setFaceFeedbackType('success');
         performCapture();
@@ -419,6 +455,155 @@ export default function SelfieLivenessTest() {
     const v2 = Math.sqrt(Math.pow(eye[2].x - eye[4].x, 2) + Math.pow(eye[2].y - eye[4].y, 2));
     const h = Math.sqrt(Math.pow(eye[0].x - eye[3].x, 2) + Math.pow(eye[0].y - eye[3].y, 2));
     return (v1 + v2) / (2 * h);
+  };
+
+  const clearOverlayCanvas = () => {
+    const canvas = overlayCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const drawFaceLandmarks = (landmarks, box) => {
+    const canvas = overlayCanvasRef.current;
+    const video = faceVideoRef.current;
+    if (!canvas || !video) return;
+
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Scale factors for canvas
+    const scaleX = canvas.width / video.videoWidth;
+    const scaleY = canvas.height / video.videoHeight;
+
+    // Get all 68 landmark points
+    const points = landmarks.positions;
+    
+    // Scale all points
+    const scaledPoints = points.map(p => ({
+      x: p.x * scaleX,
+      y: p.y * scaleY
+    }));
+
+    // Define mesh connections (triangulation for face mesh effect)
+    const meshConnections = [
+      // Forehead/eyebrow connections
+      [17, 18], [18, 19], [19, 20], [20, 21],
+      [22, 23], [23, 24], [24, 25], [25, 26],
+      // Eyebrow to eye connections
+      [17, 36], [18, 36], [18, 37], [19, 37], [19, 38], [20, 38], [20, 39], [21, 39],
+      [22, 42], [23, 42], [23, 43], [24, 43], [24, 44], [25, 44], [25, 45], [26, 45],
+      // Cross eyebrow connections
+      [17, 21], [22, 26],
+      [19, 21], [22, 24],
+      // Left eye
+      [36, 37], [37, 38], [38, 39], [39, 40], [40, 41], [41, 36],
+      [36, 39], [37, 40], [38, 41],
+      // Right eye
+      [42, 43], [43, 44], [44, 45], [45, 46], [46, 47], [47, 42],
+      [42, 45], [43, 46], [44, 47],
+      // Nose bridge
+      [27, 28], [28, 29], [29, 30],
+      // Nose bottom
+      [30, 31], [30, 35], [31, 32], [32, 33], [33, 34], [34, 35],
+      [31, 33], [33, 35],
+      // Nose to eye connections
+      [27, 21], [27, 22], [27, 39], [27, 42],
+      [28, 39], [28, 42],
+      [29, 31], [29, 35],
+      // Eye to nose connections
+      [39, 27], [42, 27],
+      [40, 29], [47, 29],
+      [41, 31], [46, 35],
+      // Jaw outline
+      [0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 7], [7, 8],
+      [8, 9], [9, 10], [10, 11], [11, 12], [12, 13], [13, 14], [14, 15], [15, 16],
+      // Jaw to face connections
+      [0, 17], [1, 36], [2, 41], [3, 31],
+      [16, 26], [15, 45], [14, 46], [13, 35],
+      [4, 48], [5, 48], [6, 59],
+      [12, 54], [11, 54], [10, 55],
+      [7, 58], [8, 57], [9, 56],
+      // Outer mouth
+      [48, 49], [49, 50], [50, 51], [51, 52], [52, 53], [53, 54],
+      [54, 55], [55, 56], [56, 57], [57, 58], [58, 59], [59, 48],
+      // Inner mouth
+      [60, 61], [61, 62], [62, 63], [63, 64], [64, 65], [65, 66], [66, 67], [67, 60],
+      // Mouth connections
+      [48, 60], [51, 62], [54, 64], [57, 66],
+      [49, 61], [50, 62], [52, 63], [53, 64],
+      [55, 65], [56, 66], [58, 67], [59, 60],
+      // Nose to mouth
+      [31, 48], [32, 49], [33, 51], [34, 53], [35, 54],
+      // Cross face connections for mesh effect
+      [36, 41], [42, 47],
+      [31, 41], [35, 46],
+      [30, 33], [27, 30],
+      // Forehead mesh
+      [17, 19], [19, 21], [22, 24], [24, 26],
+      [18, 20], [23, 25],
+      // Upper face cross connections
+      [21, 27], [22, 27],
+      [17, 0], [26, 16],
+    ];
+
+    // Draw mesh lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.lineWidth = 1;
+    
+    meshConnections.forEach(([i, j]) => {
+      if (scaledPoints[i] && scaledPoints[j]) {
+        ctx.beginPath();
+        ctx.moveTo(scaledPoints[i].x, scaledPoints[i].y);
+        ctx.lineTo(scaledPoints[j].x, scaledPoints[j].y);
+        ctx.stroke();
+      }
+    });
+
+    // Draw all landmark points as dots
+    scaledPoints.forEach((point, index) => {
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 2.5, 0, 2 * Math.PI);
+      
+      // Color based on feature
+      if (index >= 36 && index <= 41) {
+        // Left eye - cyan
+        ctx.fillStyle = 'rgba(0, 255, 255, 0.9)';
+      } else if (index >= 42 && index <= 47) {
+        // Right eye - cyan
+        ctx.fillStyle = 'rgba(0, 255, 255, 0.9)';
+      } else if (index >= 27 && index <= 35) {
+        // Nose - light green
+        ctx.fillStyle = 'rgba(150, 255, 200, 0.9)';
+      } else if (index >= 48 && index <= 67) {
+        // Mouth - light pink
+        ctx.fillStyle = 'rgba(255, 200, 220, 0.9)';
+      } else if (index >= 17 && index <= 26) {
+        // Eyebrows - yellow
+        ctx.fillStyle = 'rgba(255, 255, 150, 0.9)';
+      } else {
+        // Jaw and other - white
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      }
+      
+      ctx.fill();
+    });
+
+    // Draw horizontal scan line effect (like in the image)
+    const scanLineY = scaledPoints[27] ? scaledPoints[27].y : canvas.height / 2;
+    const gradient = ctx.createLinearGradient(0, scanLineY, canvas.width, scanLineY);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0.3)');
+    gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.5)');
+    gradient.addColorStop(0.7, 'rgba(255, 255, 255, 0.3)');
+    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    
+    ctx.strokeStyle = gradient;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(scaledPoints[0] ? scaledPoints[0].x - 20 : 0, scanLineY);
+    ctx.lineTo(scaledPoints[16] ? scaledPoints[16].x + 20 : canvas.width, scanLineY);
+    ctx.stroke();
   };
 
   const performCapture = async () => {
@@ -496,6 +681,8 @@ export default function SelfieLivenessTest() {
     setSteadySeconds(0);
     setIsCentered(false);
     setCurrentExpression('');
+    setFaceLandmarks(null);
+    setFaceBox(null);
     blinkDetectedRef.current = false;
     expressionChangeRef.current = false;
     blinkCountRef.current = 0;
@@ -601,6 +788,10 @@ export default function SelfieLivenessTest() {
           className="absolute inset-0 w-full h-full object-cover"
         />
         <canvas ref={faceCanvasRef} className="hidden" />
+        <canvas 
+          ref={overlayCanvasRef} 
+          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+        />
 
         {/* Overlay */}
         <div className="absolute inset-0 pointer-events-none">
