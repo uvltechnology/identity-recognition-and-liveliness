@@ -787,20 +787,25 @@ export default function SelfieLivenessTest() {
   // Camera View (Full Page)
   return (
     <div className="fixed inset-0 bg-black flex flex-col">
-      {/* Camera */}
+      {/* Camera or Onboarding */}
       <div className="flex-1 relative">
+        {/* Show gradient background when camera not started */}
+        {!faceDetectionStarted && (
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900" />
+        )}
+        
         <video
           ref={faceVideoRef}
           autoPlay
           muted
           playsInline
-          className="absolute inset-0 w-full h-full object-cover"
+          className={`absolute inset-0 w-full h-full object-cover ${!faceDetectionStarted ? 'hidden' : ''}`}
           style={{ transform: 'scaleX(-1)' }}
         />
         <canvas ref={faceCanvasRef} className="hidden" />
         <canvas 
           ref={overlayCanvasRef} 
-          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+          className={`absolute inset-0 w-full h-full object-cover pointer-events-none ${!faceDetectionStarted ? 'hidden' : ''}`}
           style={{ transform: 'scaleX(-1)' }}
         />
 
@@ -828,29 +833,128 @@ export default function SelfieLivenessTest() {
             <div className="relative">
               {/* Background dashed oval */}
               <div
-                className={`w-52 h-72 sm:w-60 sm:h-80 rounded-[50%] border-4 border-dashed transition-all duration-300 ${
+                className={`w-52 h-72 sm:w-60 sm:h-80 rounded-[50%] border-4 transition-all duration-300 ${
                   faceVerified
                     ? 'border-transparent'
-                    : 'border-white/30'
+                    : faceDetectionStarted
+                    ? 'border-dashed border-white/30'
+                    : 'border-solid border-white/20'
                 }`}
               />
+              
+              {/* Sample face mesh for onboarding (show when not started) */}
+              {!faceDetectionStarted && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <svg 
+                    viewBox="0 0 200 280" 
+                    className="w-44 h-60 sm:w-52 sm:h-72 opacity-40"
+                    style={{ filter: 'drop-shadow(0 0 10px rgba(59, 130, 246, 0.5))' }}
+                  >
+                    {/* Simplified face mesh illustration */}
+                    {/* Face outline */}
+                    <ellipse cx="100" cy="140" rx="70" ry="95" fill="none" stroke="rgba(147, 197, 253, 0.6)" strokeWidth="1.5"/>
+                    
+                    {/* Forehead lines */}
+                    <path d="M45 80 Q100 60 155 80" fill="none" stroke="rgba(147, 197, 253, 0.4)" strokeWidth="1"/>
+                    <path d="M50 95 Q100 80 150 95" fill="none" stroke="rgba(147, 197, 253, 0.4)" strokeWidth="1"/>
+                    
+                    {/* Left eyebrow */}
+                    <path d="M45 105 Q60 95 80 100" fill="none" stroke="rgba(253, 224, 71, 0.7)" strokeWidth="2"/>
+                    {/* Right eyebrow */}
+                    <path d="M120 100 Q140 95 155 105" fill="none" stroke="rgba(253, 224, 71, 0.7)" strokeWidth="2"/>
+                    
+                    {/* Left eye */}
+                    <ellipse cx="65" cy="125" rx="18" ry="10" fill="none" stroke="rgba(34, 211, 238, 0.8)" strokeWidth="1.5"/>
+                    <circle cx="65" cy="125" r="5" fill="rgba(34, 211, 238, 0.6)"/>
+                    {/* Right eye */}
+                    <ellipse cx="135" cy="125" rx="18" ry="10" fill="none" stroke="rgba(34, 211, 238, 0.8)" strokeWidth="1.5"/>
+                    <circle cx="135" cy="125" r="5" fill="rgba(34, 211, 238, 0.6)"/>
+                    
+                    {/* Nose bridge */}
+                    <path d="M100 110 L100 155" fill="none" stroke="rgba(167, 243, 208, 0.6)" strokeWidth="1.5"/>
+                    {/* Nose bottom */}
+                    <path d="M85 160 Q100 175 115 160" fill="none" stroke="rgba(167, 243, 208, 0.6)" strokeWidth="1.5"/>
+                    <circle cx="90" cy="158" r="3" fill="rgba(167, 243, 208, 0.5)"/>
+                    <circle cx="110" cy="158" r="3" fill="rgba(167, 243, 208, 0.5)"/>
+                    <circle cx="100" cy="165" r="3" fill="rgba(167, 243, 208, 0.5)"/>
+                    
+                    {/* Mouth */}
+                    <path d="M70 195 Q100 210 130 195" fill="none" stroke="rgba(251, 207, 232, 0.7)" strokeWidth="2"/>
+                    <path d="M75 195 Q100 185 125 195" fill="none" stroke="rgba(251, 207, 232, 0.5)" strokeWidth="1"/>
+                    
+                    {/* Jaw lines */}
+                    <path d="M30 130 Q35 180 55 210 Q100 245 145 210 Q165 180 170 130" fill="none" stroke="rgba(147, 197, 253, 0.4)" strokeWidth="1"/>
+                    
+                    {/* Cross mesh lines */}
+                    <line x1="65" y1="125" x2="100" y2="140" stroke="rgba(255,255,255,0.15)" strokeWidth="0.5"/>
+                    <line x1="135" y1="125" x2="100" y2="140" stroke="rgba(255,255,255,0.15)" strokeWidth="0.5"/>
+                    <line x1="100" y1="155" x2="65" y2="125" stroke="rgba(255,255,255,0.15)" strokeWidth="0.5"/>
+                    <line x1="100" y1="155" x2="135" y2="125" stroke="rgba(255,255,255,0.15)" strokeWidth="0.5"/>
+                    <line x1="70" y1="195" x2="85" y2="160" stroke="rgba(255,255,255,0.15)" strokeWidth="0.5"/>
+                    <line x1="130" y1="195" x2="115" y2="160" stroke="rgba(255,255,255,0.15)" strokeWidth="0.5"/>
+                    
+                    {/* Landmark dots */}
+                    {[
+                      [65, 105], [75, 102], [55, 108], // Left eyebrow
+                      [135, 105], [125, 102], [145, 108], // Right eyebrow
+                      [47, 115], [83, 115], [47, 135], [83, 135], // Left eye corners
+                      [117, 115], [153, 115], [117, 135], [153, 135], // Right eye corners
+                      [100, 125], [100, 140], [100, 155], // Nose bridge
+                      [70, 195], [85, 200], [100, 205], [115, 200], [130, 195], // Mouth
+                      [35, 150], [40, 180], [55, 205], [100, 225], [145, 205], [160, 180], [165, 150], // Jaw
+                    ].map(([x, y], i) => (
+                      <circle key={i} cx={x} cy={y} r="2" fill="rgba(255, 255, 255, 0.5)"/>
+                    ))}
+                    
+                    {/* Scanning line animation */}
+                    <line x1="35" y1="140" x2="165" y2="140" stroke="url(#scanGradient)" strokeWidth="2">
+                      <animate attributeName="y1" values="80;200;80" dur="3s" repeatCount="indefinite"/>
+                      <animate attributeName="y2" values="80;200;80" dur="3s" repeatCount="indefinite"/>
+                    </line>
+                    <defs>
+                      <linearGradient id="scanGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stopColor="rgba(59, 130, 246, 0)"/>
+                        <stop offset="30%" stopColor="rgba(59, 130, 246, 0.5)"/>
+                        <stop offset="50%" stopColor="rgba(59, 130, 246, 0.8)"/>
+                        <stop offset="70%" stopColor="rgba(59, 130, 246, 0.5)"/>
+                        <stop offset="100%" stopColor="rgba(59, 130, 246, 0)"/>
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                </div>
+              )}
+              
+              {/* Pulsing glow effect for onboarding */}
+              {!faceDetectionStarted && (
+                <div 
+                  className="absolute inset-0 w-52 h-72 sm:w-60 sm:h-80 rounded-[50%] animate-pulse"
+                  style={{
+                    boxShadow: '0 0 40px rgba(59, 130, 246, 0.3), inset 0 0 40px rgba(59, 130, 246, 0.1)',
+                  }}
+                />
+              )}
+              
               {/* Progress overlay oval using conic gradient */}
-              <div
-                className="absolute inset-0 w-52 h-72 sm:w-60 sm:h-80 rounded-[50%] transition-all duration-300"
-                style={{
-                  background: faceVerified
-                    ? 'transparent'
-                    : `conic-gradient(${
-                        livenessScore >= 60 ? '#22c55e' : livenessScore >= 30 ? '#eab308' : '#ef4444'
-                      } ${livenessScore * 3.6}deg, transparent ${livenessScore * 3.6}deg)`,
-                  WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 4px), #fff calc(100% - 4px))',
-                  mask: 'radial-gradient(farthest-side, transparent calc(100% - 4px), #fff calc(100% - 4px))',
-                }}
-              />
+              {faceDetectionStarted && (
+                <div
+                  className="absolute inset-0 w-52 h-72 sm:w-60 sm:h-80 rounded-[50%] transition-all duration-300"
+                  style={{
+                    background: faceVerified
+                      ? 'transparent'
+                      : `conic-gradient(${
+                          livenessScore >= 60 ? '#22c55e' : livenessScore >= 30 ? '#eab308' : '#ef4444'
+                        } ${livenessScore * 3.6}deg, transparent ${livenessScore * 3.6}deg)`,
+                    WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 4px), #fff calc(100% - 4px))',
+                    mask: 'radial-gradient(farthest-side, transparent calc(100% - 4px), #fff calc(100% - 4px))',
+                  }}
+                />
+              )}
+              
               {/* Success glow overlay */}
               {faceVerified && (
                 <div className="absolute inset-0 w-52 h-72 sm:w-60 sm:h-80 rounded-[50%] border-4 border-green-500 shadow-[0_0_40px_rgba(34,197,94,0.5)]" />
               )}
+              
               {/* Expression label below oval */}
               {faceDetectionStarted && currentExpression && (
                 <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 whitespace-nowrap">
@@ -877,35 +981,85 @@ export default function SelfieLivenessTest() {
               )}
             </div>
           </div>
+          
+          {/* Onboarding title (show when not started) */}
+          {!faceDetectionStarted && (
+            <div className="absolute top-20 left-0 right-0 text-center">
+              <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2">Face Verification</h1>
+              <p className="text-white/60 text-sm sm:text-base px-8">Position your face in the oval and follow the instructions</p>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Bottom Controls */}
       <div className="relative z-10 px-6 pb-8 pt-4">
-        {/* Feedback */}
-        <div
-          className={`mb-4 py-3 px-4 rounded-xl text-center font-medium ${
-            faceFeedbackType === 'success' ? 'bg-green-500 text-white'
-            : faceFeedbackType === 'error' ? 'bg-red-500 text-white'
-            : faceFeedbackType === 'warning' ? 'bg-yellow-500 text-black'
-            : 'bg-white/20 backdrop-blur text-white'
-          }`}
-        >
-          {faceFeedback}
-        </div>
+        {/* Onboarding instructions (show when not started) */}
+        {!faceDetectionStarted && (
+          <div className="mb-6 space-y-3">
+            <div className="flex items-center gap-3 text-white/80">
+              <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center flex-shrink-0">
+                <span className="text-blue-400">👁️</span>
+              </div>
+              <span className="text-sm">Look directly at the camera</span>
+            </div>
+            <div className="flex items-center gap-3 text-white/80">
+              <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center flex-shrink-0">
+                <span className="text-blue-400">😌</span>
+              </div>
+              <span className="text-sm">Blink naturally when prompted</span>
+            </div>
+            <div className="flex items-center gap-3 text-white/80">
+              <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center flex-shrink-0">
+                <span className="text-blue-400">💡</span>
+              </div>
+              <span className="text-sm">Ensure good lighting on your face</span>
+            </div>
+          </div>
+        )}
+        
+        {/* Feedback (show when started) */}
+        {faceDetectionStarted && (
+          <div
+            className={`mb-4 py-3 px-4 rounded-xl text-center font-medium ${
+              faceFeedbackType === 'success' ? 'bg-green-500 text-white'
+              : faceFeedbackType === 'error' ? 'bg-red-500 text-white'
+              : faceFeedbackType === 'warning' ? 'bg-yellow-500 text-black'
+              : 'bg-white/20 backdrop-blur text-white'
+            }`}
+          >
+            {faceFeedback}
+          </div>
+        )}
 
         {/* Button */}
         {!faceDetectionStarted && (
           <button
             onClick={startFaceDetection}
             disabled={!modelsLoaded}
-            className="w-full py-4 bg-white text-black font-bold text-lg rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100 transition"
+            className="w-full py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white font-bold text-lg rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed hover:from-blue-600 hover:to-blue-700 transition shadow-lg shadow-blue-500/30"
           >
-            {!modelsLoaded ? 'Loading AI...' : 'Start Verification'}
+            {!modelsLoaded ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                </svg>
+                Loading AI Models...
+              </span>
+            ) : (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+                Start Face Scan
+              </span>
+            )}
           </button>
         )}
 
-        {/* Indicators */}
+        {/* Indicators (show when started) */}
         {faceDetectionStarted && (
           <div className="flex justify-center gap-3 mt-4">
             <div className={`w-3 h-3 rounded-full ${isCentered ? 'bg-green-500' : 'bg-white/30'}`} title="Centered" />
