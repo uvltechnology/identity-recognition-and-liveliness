@@ -744,12 +744,6 @@ export default function SelfieLivenessTest() {
               >
                 Continue to ID Verification →
               </a>
-              <button
-                onClick={resetAll}
-                className="w-full py-3 bg-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-300 transition"
-              >
-                Start Over
-              </button>
             </div>
           </div>
         </div>

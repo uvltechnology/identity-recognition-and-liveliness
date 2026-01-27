@@ -50,6 +50,37 @@ export default function IDVerification() {
       .then(res => res.json())
       .then(data => {
         if (data.success && data.session) {
+          const sessionStatus = (data.session.status || '').toLowerCase();
+          // Check if session is already in a terminal state
+          if (['done', 'completed', 'success'].includes(sessionStatus)) {
+            // Show completed state with existing results
+            setSession(data.session);
+            setConsentGiven(true);
+            if (data.session.payload?.idType) {
+              setSelectedIdType(data.session.payload.idType);
+            }
+            if (data.session.result?.fields) {
+              setAiResult({ data: data.session.result.fields });
+            }
+            if (data.session.result?.rawText) {
+              setOcrResult({ text: data.session.result.rawText });
+            }
+            if (data.session.result?.capturedImageBase64) {
+              setCapturedImage(data.session.result.capturedImageBase64);
+            }
+            setVerificationComplete(true);
+            setFeedback('Verification already completed');
+            setFeedbackType('success');
+            return;
+          }
+          if (['failed', 'cancelled', 'canceled'].includes(sessionStatus)) {
+            setError('This verification session has been cancelled or failed. Please create a new session to verify again.');
+            return;
+          }
+          if (sessionStatus === 'expired') {
+            setError('This verification session has expired. Please create a new session.');
+            return;
+          }
           setSession(data.session);
           // Pre-select ID type from session if provided
           if (data.session.payload?.idType) {
@@ -451,10 +482,6 @@ export default function IDVerification() {
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-            <img src={capturedImage} alt="Scanned ID" className="w-full aspect-video object-contain bg-gray-100" />
-          </div>
-
           <div className="bg-white rounded-2xl shadow-lg p-4">
             <h2 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
               <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -478,32 +505,7 @@ export default function IDVerification() {
             </div>
           </div>
 
-          {ocrResult?.text && (
-            <details className="bg-white rounded-2xl shadow-lg">
-              <summary className="p-4 cursor-pointer font-bold text-gray-900 flex items-center gap-2">
-                <svg className="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                Raw OCR Text
-              </summary>
-              <div className="px-4 pb-4">
-                <pre className="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 whitespace-pre-wrap overflow-x-auto max-h-40">
-                  {ocrResult.text}
-                </pre>
-              </div>
-            </details>
-          )}
-
           <div className="space-y-3 pt-2">
-            <button
-              onClick={downloadImage}
-              className="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              Download ID Image
-            </button>
             {session?.payload?.nextStep === 'selfie' ? (
               <button
                 onClick={handleContinueToSelfie}
@@ -519,12 +521,6 @@ export default function IDVerification() {
                 Done
               </button>
             )}
-            <button
-              onClick={resetAll}
-              className="w-full py-3 bg-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-300 transition"
-            >
-              Scan Another ID
-            </button>
           </div>
         </div>
       </div>

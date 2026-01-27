@@ -356,12 +356,6 @@ export default function IDVerificationTest() {
               </svg>
               Download ID Image
             </button>
-            <button
-              onClick={resetAll}
-              className="w-full py-3 bg-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-300 transition"
-            >
-              Scan Another ID
-            </button>
             <a
               href="/"
               className="block w-full py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition text-center"

@@ -73,6 +73,32 @@ export default function SelfieLiveness() {
       .then(res => res.json())
       .then(data => {
         if (data.success && data.session) {
+          const sessionStatus = (data.session.status || '').toLowerCase();
+          // Check if session is already in a terminal state
+          if (['done', 'completed', 'success'].includes(sessionStatus)) {
+            // Show completed state with existing results
+            setSession(data.session);
+            setConsentGiven(true);
+            if (data.session.result?.capturedImageBase64) {
+              setCapturedFace(data.session.result.capturedImageBase64);
+            }
+            if (data.session.result?.livenessScore) {
+              setLivenessScore(data.session.result.livenessScore);
+              livenessScoreRef.current = data.session.result.livenessScore;
+            }
+            setFaceVerified(true);
+            setFaceFeedback('Verification already completed');
+            setFaceFeedbackType('success');
+            return;
+          }
+          if (['failed', 'cancelled', 'canceled'].includes(sessionStatus)) {
+            setError('This verification session has been cancelled or failed. Please create a new session to verify again.');
+            return;
+          }
+          if (sessionStatus === 'expired') {
+            setError('This verification session has expired. Please create a new session.');
+            return;
+          }
           setSession(data.session);
           setFaceFeedback('Press Start to begin');
         } else {
@@ -827,7 +853,6 @@ export default function SelfieLiveness() {
             </div>
 
             <div className="bg-white rounded-2xl shadow-xl overflow-hidden mb-6">
-              <img src={capturedFace} alt="Verified selfie" className="w-full aspect-[4/3] object-cover" />
               <div className="p-4">
                 <div className="flex items-center gap-2 text-green-600 mb-3">
                   <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -854,25 +879,10 @@ export default function SelfieLiveness() {
 
             <div className="space-y-3">
               <button
-                onClick={downloadFace}
-                className="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Download Selfie
-              </button>
-              <button
                 onClick={handleDone}
                 className="w-full py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition"
               >
                 Done
-              </button>
-              <button
-                onClick={resetAll}
-                className="w-full py-3 bg-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-300 transition"
-              >
-                Start Over
               </button>
             </div>
           </div>
