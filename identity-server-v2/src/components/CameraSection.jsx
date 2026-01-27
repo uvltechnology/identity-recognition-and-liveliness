@@ -5,6 +5,7 @@ export default function CameraSection({ cameraStarted, idType, onProblem }) {
   const canvasRef = useRef(null);
   const [stream, setStream] = useState(null);
   const [feedbackMessage, setFeedbackMessage] = useState('Center your document');
+  const [isFrontCamera, setIsFrontCamera] = useState(false);
 
   useEffect(() => {
     if (cameraStarted && !stream) {
@@ -30,6 +31,10 @@ export default function CameraSection({ cameraStarted, idType, onProblem }) {
 
       const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
       setStream(mediaStream);
+      
+      // Check if using front camera to apply mirror effect
+      const facingMode = mediaStream.getVideoTracks()[0]?.getSettings()?.facingMode;
+      setIsFrontCamera(facingMode === 'user');
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
@@ -65,6 +70,9 @@ export default function CameraSection({ cameraStarted, idType, onProblem }) {
 
       const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
       setStream(mediaStream);
+      
+      // Update mirror effect based on new camera
+      setIsFrontCamera(newFacingMode === 'user');
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
@@ -85,6 +93,7 @@ export default function CameraSection({ cameraStarted, idType, onProblem }) {
           muted
           playsInline
           className="h-64 w-full object-cover sm:h-72 md:h-80 lg:h-[26rem]"
+          style={{ transform: isFrontCamera ? 'scaleX(-1)' : 'none' }}
         />
         <canvas ref={canvasRef} style={{ display: 'none' }} />
 

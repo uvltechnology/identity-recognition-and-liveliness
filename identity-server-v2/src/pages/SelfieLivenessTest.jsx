@@ -13,10 +13,10 @@ const MIN_FACE_SIZE_RATIO = 0.25;  // Face should be at least 25% of video heigh
 const MAX_FACE_SIZE_RATIO = 0.55;  // Face should be at most 55% of video height
 
 // Anti-spoofing thresholds
-const MIN_MICRO_MOVEMENT = 0.5;       // Minimum natural micro-movements (real faces are never perfectly still)
-const MAX_STATIC_FRAMES = 8;          // Max frames without micro-movement before flagging as photo
-const REQUIRED_BLINKS = 1;            // Require 1 blink
-const HEAD_POSE_VARIANCE_MIN = 2;     // Minimum head pose variance (photos are too stable)
+const MIN_MICRO_MOVEMENT = 0.3;       // Lowered - real faces have subtle micro-movements
+const MAX_STATIC_FRAMES = 15;         // Increased - allow more still frames before flagging
+const REQUIRED_BLINKS = 1;            // Require 1 blink (blink is the main liveness check)
+const HEAD_POSE_VARIANCE_MIN = 0.5;   // Lowered - natural head sway is subtle
 
 export default function SelfieLivenessTest() {
   const faceVideoRef = useRef(null);
@@ -389,13 +389,17 @@ export default function SelfieLivenessTest() {
       // === ANTI-SPOOFING: Check for photo/spoof indicators ===
       const isTooStatic = staticFrameCountRef.current > MAX_STATIC_FRAMES;
       const hasNoHeadMovement = headPoseHistoryRef.current.length >= 10 && headPoseVariance < HEAD_POSE_VARIANCE_MIN;
-      const potentialSpoof = isTooStatic || hasNoHeadMovement;
       
-      // Penalize score for spoof indicators
-      if (potentialSpoof) {
-        indicators = Math.max(0, indicators - 2);
+      // Only flag as spoof if BOTH conditions are met AND no blink detected
+      // Blink detection is the strongest proof of a real face
+      const potentialSpoof = (isTooStatic && hasNoHeadMovement) && !blinkDetectedRef.current;
+      
+      // Penalize score for spoof indicators (only if no blink yet)
+      if (potentialSpoof && !blinkDetectedRef.current) {
+        indicators = Math.max(0, indicators - 1);
         spoofDetectedRef.current = true;
-      } else if (microMovement > MIN_MICRO_MOVEMENT) {
+      } else if (blinkDetectedRef.current || microMovement > MIN_MICRO_MOVEMENT) {
+        // Clear spoof flag if blink detected or movement detected
         spoofDetectedRef.current = false;
       }
 
@@ -411,18 +415,18 @@ export default function SelfieLivenessTest() {
       setSteadySeconds(remaining);
 
       if (!faceIsCentered) {
-        // Mirror-corrected directions (camera is mirrored, so left/right are flipped)
+        // Directions match mirrored view (scaleX(-1) applied to video)
         const moveHorizontal = offsetX >= CENTER_TOLERANCE;
         const moveVertical = offsetY >= CENTER_TOLERANCE;
         
         if (moveHorizontal && moveVertical) {
           // Need to move both directions
-          const hDir = faceCenterX < videoCenterX ? '→ Move right' : '← Move left';
+          const hDir = faceCenterX < videoCenterX ? '← Move left' : '→ Move right';
           const vDir = faceCenterY < videoCenterY ? '↓ Move down' : '↑ Move up';
           setFaceFeedback(`${hDir} and ${vDir}`);
         } else if (moveHorizontal) {
-          // Inverted for mirror view: if face is on left of video, user needs to move right
-          setFaceFeedback(faceCenterX < videoCenterX ? '→ Move right' : '← Move left');
+          // With mirror applied: if face appears on left, user moves left to center
+          setFaceFeedback(faceCenterX < videoCenterX ? '← Move left' : '→ Move right');
         } else if (moveVertical) {
           setFaceFeedback(faceCenterY < videoCenterY ? '↓ Move face down' : '↑ Move face up');
         }
@@ -791,11 +795,13 @@ export default function SelfieLivenessTest() {
           muted
           playsInline
           className="absolute inset-0 w-full h-full object-cover"
+          style={{ transform: 'scaleX(-1)' }}
         />
         <canvas ref={faceCanvasRef} className="hidden" />
         <canvas 
           ref={overlayCanvasRef} 
           className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+          style={{ transform: 'scaleX(-1)' }}
         />
 
         {/* Overlay */}
