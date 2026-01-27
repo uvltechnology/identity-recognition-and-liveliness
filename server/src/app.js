@@ -490,6 +490,148 @@ async function createVerifySessionHandler(req, res) {
 app.post('/api/verify/create', createVerifySessionHandler);
 app.post('/verify/create', createVerifySessionHandler);
 
+// ---------- Session-based ID and Selfie verification endpoints ----------
+
+// Create ID verification session only
+async function createIDVerificationSessionHandler(req, res) {
+  try {
+    const payload = req.body || {};
+    const sessionId = makeSessionId();
+    const now = Date.now();
+    
+    const storedPayload = { ...(payload || {}), verificationType: 'id' };
+    if (payload.origin) storedPayload.origin = payload.origin;
+    if (payload.idType) storedPayload.idType = payload.idType;
+    if (payload.successUrl) storedPayload.successUrl = payload.successUrl;
+    if (payload.successWebhook) storedPayload.successWebhook = payload.successWebhook;
+    if (payload.cancelWebhook) storedPayload.cancelWebhook = payload.cancelWebhook;
+    if (typeof payload.testMode === 'boolean') storedPayload.testMode = payload.testMode;
+
+    const sessionObj = { id: sessionId, createdAt: now, payload: storedPayload, status: 'pending' };
+    const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 60 * 60);
+    await setSession(sessionId, sessionObj, ttl);
+
+    const origin = req.protocol + '://' + req.get('host');
+    let iframeUrl = `${origin}/session/idverification/${sessionId}`;
+    if (payload && payload.origin) {
+      const enc = encodeURIComponent(String(payload.origin));
+      iframeUrl += `?expectedOrigin=${enc}`;
+    }
+
+    console.log("Create ID verification session:", sessionId, "idType:", payload.idType || 'not specified');
+    res.json({ success: true, sessionId, iframeUrl, verificationType: 'id' });
+  } catch (e) {
+    console.error('Create ID verification session error', e);
+    res.status(500).json({ success: false, error: 'Failed to create ID verification session' });
+  }
+}
+
+app.post('/api/verify/id/create', createIDVerificationSessionHandler);
+app.post('/verify/id/create', createIDVerificationSessionHandler);
+
+// Create Selfie liveness session only
+async function createSelfieSessionHandler(req, res) {
+  try {
+    const payload = req.body || {};
+    const sessionId = makeSessionId();
+    const now = Date.now();
+    
+    const storedPayload = { ...(payload || {}), verificationType: 'selfie' };
+    if (payload.origin) storedPayload.origin = payload.origin;
+    if (payload.successUrl) storedPayload.successUrl = payload.successUrl;
+    if (payload.successWebhook) storedPayload.successWebhook = payload.successWebhook;
+    if (payload.cancelWebhook) storedPayload.cancelWebhook = payload.cancelWebhook;
+    if (typeof payload.testMode === 'boolean') storedPayload.testMode = payload.testMode;
+
+    const sessionObj = { id: sessionId, createdAt: now, payload: storedPayload, status: 'pending' };
+    const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 60 * 60);
+    await setSession(sessionId, sessionObj, ttl);
+
+    const origin = req.protocol + '://' + req.get('host');
+    let iframeUrl = `${origin}/session/selfieliveness/${sessionId}`;
+    if (payload && payload.origin) {
+      const enc = encodeURIComponent(String(payload.origin));
+      iframeUrl += `?expectedOrigin=${enc}`;
+    }
+
+    console.log("Create selfie liveness session:", sessionId);
+    res.json({ success: true, sessionId, iframeUrl, verificationType: 'selfie' });
+  } catch (e) {
+    console.error('Create selfie liveness session error', e);
+    res.status(500).json({ success: false, error: 'Failed to create selfie liveness session' });
+  }
+}
+
+app.post('/api/verify/selfie/create', createSelfieSessionHandler);
+app.post('/verify/selfie/create', createSelfieSessionHandler);
+
+// Create combined session: ID verification first, then auto-create selfie session
+async function createCombinedVerificationSessionHandler(req, res) {
+  try {
+    const payload = req.body || {};
+    const idSessionId = makeSessionId();
+    const selfieSessionId = makeSessionId();
+    const now = Date.now();
+    
+    // Create selfie session first (will be used after ID verification completes)
+    const selfiePayload = { 
+      ...(payload || {}), 
+      verificationType: 'selfie',
+      linkedIdSessionId: idSessionId  // Link back to ID session
+    };
+    if (payload.origin) selfiePayload.origin = payload.origin;
+    if (payload.successUrl) selfiePayload.successUrl = payload.successUrl;
+    if (payload.successWebhook) selfiePayload.successWebhook = payload.successWebhook;
+    if (payload.cancelWebhook) selfiePayload.cancelWebhook = payload.cancelWebhook;
+    if (typeof payload.testMode === 'boolean') selfiePayload.testMode = payload.testMode;
+
+    const selfieSessionObj = { id: selfieSessionId, createdAt: now, payload: selfiePayload, status: 'pending' };
+    const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 60 * 60);
+    await setSession(selfieSessionId, selfieSessionObj, ttl);
+
+    // Create ID verification session with link to selfie session
+    const idPayload = { 
+      ...(payload || {}), 
+      verificationType: 'id',
+      nextStep: 'selfie',
+      selfieSessionId: selfieSessionId  // Link to selfie session
+    };
+    if (payload.origin) idPayload.origin = payload.origin;
+    if (payload.idType) idPayload.idType = payload.idType;
+    if (payload.successWebhook) idPayload.successWebhook = payload.successWebhook;
+    if (payload.cancelWebhook) idPayload.cancelWebhook = payload.cancelWebhook;
+    if (typeof payload.testMode === 'boolean') idPayload.testMode = payload.testMode;
+
+    const idSessionObj = { id: idSessionId, createdAt: now, payload: idPayload, status: 'pending' };
+    await setSession(idSessionId, idSessionObj, ttl);
+
+    const origin = req.protocol + '://' + req.get('host');
+    let idIframeUrl = `${origin}/session/idverification/${idSessionId}`;
+    let selfieIframeUrl = `${origin}/session/selfieliveness/${selfieSessionId}`;
+    if (payload && payload.origin) {
+      const enc = encodeURIComponent(String(payload.origin));
+      idIframeUrl += `?expectedOrigin=${enc}`;
+      selfieIframeUrl += `?expectedOrigin=${enc}`;
+    }
+
+    console.log("Create combined verification session - ID:", idSessionId, "Selfie:", selfieSessionId);
+    res.json({ 
+      success: true, 
+      idSessionId, 
+      selfieSessionId,
+      iframeUrl: idIframeUrl,  // Start with ID verification
+      selfieIframeUrl,
+      verificationType: 'combined'
+    });
+  } catch (e) {
+    console.error('Create combined verification session error', e);
+    res.status(500).json({ success: false, error: 'Failed to create combined verification session' });
+  }
+}
+
+app.post('/api/verify/combined/create', createCombinedVerificationSessionHandler);
+app.post('/verify/combined/create', createCombinedVerificationSessionHandler);
+
 // Return JSON info about a session
 app.get('/api/verify/session/:id', async (req, res) => {
   try {

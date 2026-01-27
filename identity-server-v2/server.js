@@ -459,6 +459,146 @@ async function createServer() {
   app.post('/api/verify/create', createVerifySessionHandler);
   app.post('/verify/create', createVerifySessionHandler);
 
+  // Create ID verification session only
+  async function createIDVerificationSessionHandler(req, res) {
+    try {
+      const payload = req.body || {};
+      const sessionId = makeSessionId();
+      
+      const sessionObj = {
+        id: sessionId,
+        createdAt: Date.now(),
+        payload: {
+          ...payload,
+          verificationType: 'id-only',
+          idType: payload.idType || 'national-id',
+        },
+        status: 'pending'
+      };
+      
+      const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 3600);
+      await setSession(sessionId, sessionObj, ttl);
+
+      const origin = req.protocol + '://' + req.get('host');
+      const sessionUrl = `${origin}/session/idverification/${sessionId}`;
+      const embedUrl = `${origin}/embed/session/${sessionId}`;
+      const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
+
+      console.log("Created ID verification session:", sessionId, "idType:", payload.idType || 'national-id');
+      res.json({ 
+        success: true, 
+        sessionId, 
+        sessionUrl, 
+        embedUrl,
+        expiresAt
+      });
+    } catch (e) {
+      console.error('Create ID verification session error:', e);
+      res.status(500).json({ success: false, error: 'Failed to create session' });
+    }
+  }
+
+  // Create Selfie Liveness session only
+  async function createSelfieSessionHandler(req, res) {
+    try {
+      const payload = req.body || {};
+      const sessionId = makeSessionId();
+      
+      const sessionObj = {
+        id: sessionId,
+        createdAt: Date.now(),
+        payload: {
+          ...payload,
+          verificationType: 'selfie-only',
+        },
+        status: 'pending'
+      };
+      
+      const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 3600);
+      await setSession(sessionId, sessionObj, ttl);
+
+      const origin = req.protocol + '://' + req.get('host');
+      const sessionUrl = `${origin}/session/selfieliveness/${sessionId}`;
+      const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
+
+      console.log("Created selfie liveness session:", sessionId);
+      res.json({ 
+        success: true, 
+        sessionId, 
+        sessionUrl,
+        expiresAt
+      });
+    } catch (e) {
+      console.error('Create selfie session error:', e);
+      res.status(500).json({ success: false, error: 'Failed to create session' });
+    }
+  }
+
+  // Create Combined verification session (ID first, then selfie)
+  async function createCombinedVerificationSessionHandler(req, res) {
+    try {
+      const payload = req.body || {};
+      const idSessionId = makeSessionId();
+      const selfieSessionId = makeSessionId();
+      
+      const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 3600);
+      const origin = req.protocol + '://' + req.get('host');
+      
+      // Create ID verification session with link to selfie session
+      const idSessionObj = {
+        id: idSessionId,
+        createdAt: Date.now(),
+        payload: {
+          ...payload,
+          verificationType: 'combined',
+          idType: payload.idType || 'national-id',
+          nextStep: 'selfie',
+          selfieSessionId: selfieSessionId,
+        },
+        status: 'pending'
+      };
+      await setSession(idSessionId, idSessionObj, ttl);
+
+      // Create selfie session (pending, will be used after ID verification)
+      const selfieSessionObj = {
+        id: selfieSessionId,
+        createdAt: Date.now(),
+        payload: {
+          ...payload,
+          verificationType: 'combined-selfie',
+          linkedIdSession: idSessionId,
+        },
+        status: 'pending'
+      };
+      await setSession(selfieSessionId, selfieSessionObj, ttl);
+
+      const sessionUrl = `${origin}/session/idverification/${idSessionId}`;
+      const selfieSessionUrl = `${origin}/session/selfieliveness/${selfieSessionId}`;
+      const embedUrl = `${origin}/embed/session/${idSessionId}`;
+      const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
+
+      console.log("Created combined verification session:", idSessionId, "->", selfieSessionId);
+      res.json({ 
+        success: true, 
+        sessionId: idSessionId, 
+        selfieSessionId,
+        sessionUrl,
+        selfieSessionUrl,
+        embedUrl,
+        nextStep: 'selfie',
+        expiresAt
+      });
+    } catch (e) {
+      console.error('Create combined session error:', e);
+      res.status(500).json({ success: false, error: 'Failed to create session' });
+    }
+  }
+
+  // Register the new session creation routes
+  app.post('/api/verify/id/create', createIDVerificationSessionHandler);
+  app.post('/api/verify/selfie/create', createSelfieSessionHandler);
+  app.post('/api/verify/combined/create', createCombinedVerificationSessionHandler);
+
   // Get session info
   app.get('/api/verify/session/:id', async (req, res) => {
     try {

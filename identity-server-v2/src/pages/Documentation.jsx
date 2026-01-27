@@ -369,6 +369,97 @@ Headers:
             through liveness detection to final result.
           </p>
 
+          <div className="mb-6 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-semibold text-white">Try it out!</h4>
+                <p className="text-white/80 text-sm mt-1">
+                  Test the session creation endpoints in our interactive API demo.
+                </p>
+              </div>
+              <a
+                href="/api-demo"
+                className="px-4 py-2 bg-white hover:bg-gray-100 text-blue-600 font-medium rounded-lg transition-colors text-sm"
+              >
+                Open API Demo →
+              </a>
+            </div>
+          </div>
+
+          <h3 className="text-lg font-semibold text-gray-900 mt-6 mb-4">Create Sessions</h3>
+          <p className="text-gray-600 mb-4">
+            Use these endpoints to create verification sessions for different verification flows.
+          </p>
+
+          <EndpointCard
+            method="POST"
+            path="/api/verify/id/create"
+            description="Create an ID verification session only. Use this when you only need to verify an identity document without selfie/liveness check."
+            requestBody={`{
+  "idType": "national-id",
+  "successUrl": "https://yourapp.com/callback",
+  "webhookUrl": "https://yourapp.com/webhook",
+  "testMode": false,
+  "authRequired": false
+}`}
+            responseBody={`{
+  "success": true,
+  "sessionId": "sess_id_abc123xyz",
+  "sessionUrl": "https://identity.yamcon.dev/session/idverification/sess_id_abc123xyz",
+  "embedUrl": "https://identity.yamcon.dev/embed/session/sess_id_abc123xyz",
+  "expiresAt": "2026-01-26T11:00:00.000Z"
+}`}
+          />
+
+          <EndpointCard
+            method="POST"
+            path="/api/verify/selfie/create"
+            description="Create a selfie liveness verification session only. Use this when you only need to verify that a real person is present without ID document scanning."
+            requestBody={`{
+  "successUrl": "https://yourapp.com/callback",
+  "webhookUrl": "https://yourapp.com/webhook",
+  "testMode": false
+}`}
+            responseBody={`{
+  "success": true,
+  "sessionId": "sess_selfie_xyz789",
+  "sessionUrl": "https://identity.yamcon.dev/session/selfieliveness/sess_selfie_xyz789",
+  "expiresAt": "2026-01-26T11:00:00.000Z"
+}`}
+          />
+
+          <EndpointCard
+            method="POST"
+            path="/api/verify/combined/create"
+            description="Create a combined verification flow that starts with ID verification, then automatically proceeds to selfie liveness verification. Ideal for full KYC flows."
+            requestBody={`{
+  "idType": "national-id",
+  "successUrl": "https://yourapp.com/callback",
+  "webhookUrl": "https://yourapp.com/webhook",
+  "testMode": false,
+  "authRequired": false
+}`}
+            responseBody={`{
+  "success": true,
+  "sessionId": "sess_combined_abc123",
+  "selfieSessionId": "sess_selfie_def456",
+  "sessionUrl": "https://identity.yamcon.dev/session/idverification/sess_combined_abc123",
+  "selfieSessionUrl": "https://identity.yamcon.dev/session/selfieliveness/sess_selfie_def456",
+  "embedUrl": "https://identity.yamcon.dev/embed/session/sess_combined_abc123",
+  "nextStep": "selfie",
+  "expiresAt": "2026-01-26T11:00:00.000Z"
+}`}
+          >
+            <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-sm text-blue-700">
+                <strong>Flow:</strong> After ID verification completes, the user will automatically be redirected 
+                to the selfie liveness verification using the pre-created <code className="bg-blue-100 px-1 rounded">selfieSessionId</code>.
+              </p>
+            </div>
+          </EndpointCard>
+
+          <h3 className="text-lg font-semibold text-gray-900 mt-8 mb-4">Retrieve & Update Sessions</h3>
+
           <EndpointCard
             method="GET"
             path="/api/session/:id"
