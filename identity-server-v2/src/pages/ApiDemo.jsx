@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import Header from '../components/Header';
 
 const CodeBlock = ({ code, language = 'json' }) => {
   const [copied, setCopied] = useState(false);
@@ -10,13 +11,13 @@ const CodeBlock = ({ code, language = 'json' }) => {
   };
 
   return (
-    <div className="relative group">
-      <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm max-h-80 overflow-y-auto">
-        <code>{code}</code>
+    <div className="relative group w-full max-w-full overflow-hidden">
+      <pre className="bg-gray-900 text-gray-100 p-3 sm:p-4 rounded-lg overflow-x-auto text-sm max-h-60 sm:max-h-80 overflow-y-auto w-full">
+        <code className="break-all sm:break-normal whitespace-pre-wrap">{code}</code>
       </pre>
       <button
         onClick={handleCopy}
-        className="absolute top-2 right-2 px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute top-2 right-2 px-2 py-1 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
       >
         {copied ? 'Copied!' : 'Copy'}
       </button>
@@ -65,18 +66,18 @@ const EndpointTester = ({
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-      <div className="bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-4">
-        <div className="flex items-center gap-3">
-          <span className="px-2 py-1 bg-white/20 text-white text-xs font-bold rounded">
+      <div className="bg-gradient-to-r from-blue-600 to-purple-600 px-4 sm:px-6 py-3 sm:py-4">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <span className="px-2 py-1 bg-white/20 text-white text-sm font-bold rounded">
             {method}
           </span>
-          <code className="text-white/90 text-sm">{endpoint}</code>
+          <code className="text-white/90 text-sm break-all">{endpoint}</code>
         </div>
-        <h3 className="text-white font-semibold mt-2">{title}</h3>
+        <h3 className="text-white font-semibold mt-2 text-base sm:text-lg">{title}</h3>
         <p className="text-white/80 text-sm mt-1">{description}</p>
       </div>
 
-      <div className="p-6 space-y-4">
+      <div className="p-4 sm:p-6 space-y-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Request Body
@@ -84,7 +85,7 @@ const EndpointTester = ({
           <textarea
             value={requestBody}
             onChange={(e) => setRequestBody(e.target.value)}
-            className="w-full h-40 px-3 py-2 text-sm font-mono bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full h-36 sm:h-40 px-3 py-2 text-sm font-mono bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             spellCheck={false}
           />
         </div>
@@ -159,10 +160,10 @@ const SessionCard = ({ session, type }) => {
   };
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4">
-      <div className="flex items-center justify-between mb-3">
+    <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
         <div className="flex items-center gap-2">
-          <span className={`px-2 py-1 text-xs font-medium rounded ${
+          <span className={`px-2 py-1 text-sm font-medium rounded ${
             type === 'id' ? 'bg-blue-100 text-blue-700' :
             type === 'selfie' ? 'bg-purple-100 text-purple-700' :
             'bg-green-100 text-green-700'
@@ -170,49 +171,49 @@ const SessionCard = ({ session, type }) => {
             {type === 'id' ? 'ID Verification' : type === 'selfie' ? 'Selfie Liveness' : 'Combined Flow'}
           </span>
         </div>
-        <span className="text-xs text-gray-500">
+        <span className="text-sm text-gray-500">
           {new Date().toLocaleTimeString()}
         </span>
       </div>
 
       <div className="space-y-2 text-sm">
-        <div>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
           <span className="text-gray-500">Session ID:</span>
-          <code className="ml-2 px-2 py-0.5 bg-gray-100 rounded text-gray-700">{session.sessionId}</code>
+          <code className="px-2 py-0.5 bg-gray-100 rounded text-gray-700 text-sm break-all">{session.sessionId}</code>
         </div>
         {session.selfieSessionId && (
-          <div>
-            <span className="text-gray-500">Selfie Session ID:</span>
-            <code className="ml-2 px-2 py-0.5 bg-gray-100 rounded text-gray-700">{session.selfieSessionId}</code>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+            <span className="text-gray-500">Selfie Session:</span>
+            <code className="px-2 py-0.5 bg-gray-100 rounded text-gray-700 text-sm break-all">{session.selfieSessionId}</code>
           </div>
         )}
       </div>
 
-      <div className="flex gap-2 mt-4">
+      <div className="flex flex-col sm:flex-row gap-2 mt-4">
         <a
           href={getSessionUrl()}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg text-center transition-colors"
+          className="flex-1 px-3 py-2.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg text-center transition-colors"
         >
           Open in New Tab
         </a>
         <button
           onClick={() => setShowIframe(!showIframe)}
-          className="flex-1 px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors"
+          className="flex-1 px-3 py-2.5 sm:py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors hidden sm:block"
         >
           {showIframe ? 'Hide Preview' : 'Show Preview'}
         </button>
       </div>
 
       {showIframe && (
-        <div className="mt-4 border border-gray-300 rounded-lg overflow-hidden">
-          <div className="bg-gray-100 px-3 py-2 text-xs text-gray-600 border-b border-gray-300">
+        <div className="mt-4 border border-gray-300 rounded-lg overflow-hidden hidden sm:block">
+          <div className="bg-gray-100 px-3 py-2 text-xs text-gray-600 border-b border-gray-300 truncate">
             Preview: {getSessionUrl()}
           </div>
           <iframe
             src={getSessionUrl()}
-            className="w-full h-[500px]"
+            className="w-full h-[400px] lg:h-[500px]"
             allow="camera"
             title="Verification Preview"
           />
@@ -259,40 +260,17 @@ export default function ApiDemo() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                </svg>
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-gray-900">API Demo</h1>
-                <p className="text-sm text-gray-500">Test the Session Creation Endpoints</p>
-              </div>
-            </div>
-            <a
-              href="/docs"
-              className="px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors"
-            >
-              ← Back to Docs
-            </a>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <Header />
+      
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8">
         {/* Introduction */}
-        <div className="mb-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl p-6 text-white">
-          <h2 className="text-2xl font-bold mb-2">Interactive API Tester</h2>
-          <p className="text-white/90">
+        <div className="mb-6 sm:mb-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl p-4 sm:p-6 text-white">
+          <h2 className="text-xl sm:text-2xl font-bold mb-2">Interactive API Tester</h2>
+          <p className="text-white/90 text-sm sm:text-base">
             Test the three session creation endpoints below. Each endpoint creates a verification session
             that you can then open and interact with.
           </p>
-          <div className="flex gap-4 mt-4">
+          <div className="flex flex-wrap gap-3 sm:gap-4 mt-4">
             <div className="flex items-center gap-2 text-sm">
               <span className="w-2 h-2 bg-blue-300 rounded-full"></span>
               ID Verification
@@ -308,9 +286,9 @@ export default function ApiDemo() {
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-2 gap-8">
+        <div className="grid lg:grid-cols-2 gap-4 sm:gap-8">
           {/* Left: Endpoint Testers */}
-          <div className="space-y-6">
+          <div className="space-y-4 sm:space-y-6">
             <EndpointTester
               title="Create ID Verification Session"
               description="Creates a session for ID document verification only"
@@ -341,11 +319,11 @@ export default function ApiDemo() {
 
           {/* Right: Created Sessions */}
           <div>
-            <div className="sticky top-24">
+            <div className="lg:sticky lg:top-24">
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                <div className="bg-gray-50 px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200">
                   <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-gray-900">Created Sessions</h3>
+                    <h3 className="font-semibold text-gray-900 text-base">Created Sessions</h3>
                     {createdSessions.length > 0 && (
                       <button
                         onClick={() => setCreatedSessions([])}
@@ -356,25 +334,25 @@ export default function ApiDemo() {
                     )}
                   </div>
                   <p className="text-sm text-gray-500 mt-1">
-                    Sessions created during this demo session
+                    Sessions created during this demo
                   </p>
                 </div>
 
-                <div className="p-4 max-h-[calc(100vh-200px)] overflow-y-auto">
+                <div className="p-3 sm:p-4 max-h-[300px] sm:max-h-[calc(100vh-200px)] overflow-y-auto">
                   {createdSessions.length === 0 ? (
-                    <div className="text-center py-12">
-                      <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="text-center py-8 sm:py-12">
+                      <div className="w-12 h-12 sm:w-16 sm:h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4">
+                        <svg className="w-6 h-6 sm:w-8 sm:h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                         </svg>
                       </div>
-                      <p className="text-gray-500">No sessions created yet</p>
+                      <p className="text-gray-500 text-sm">No sessions created yet</p>
                       <p className="text-sm text-gray-400 mt-1">
-                        Use the endpoints on the left to create sessions
+                        Use the endpoints above to create sessions
                       </p>
                     </div>
                   ) : (
-                    <div className="space-y-4">
+                    <div className="space-y-3 sm:space-y-4">
                       {createdSessions.map((session, index) => (
                         <SessionCard key={index} session={session} type={session.type} />
                       ))}
@@ -384,40 +362,40 @@ export default function ApiDemo() {
               </div>
 
               {/* Quick Links */}
-              <div className="mt-6 bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                <h4 className="font-medium text-gray-900 mb-3">Quick Links</h4>
-                <div className="space-y-2">
+              <div className="mt-4 sm:mt-6 bg-white rounded-xl shadow-sm border border-gray-200 p-3 sm:p-4">
+                <h4 className="font-medium text-gray-900 mb-2 sm:mb-3 text-base">Quick Links</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-1 gap-1 sm:gap-2">
                   <a
                     href="/id-verification-test"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+                    className="flex items-center gap-2 px-3 py-2.5 sm:py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
                     </svg>
-                    ID Verification Test Page
+                    ID Verification Test
                   </a>
                   <a
                     href="/selfie-liveness-test"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+                    className="flex items-center gap-2 px-3 py-2.5 sm:py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                     </svg>
-                    Selfie Liveness Test Page
+                    Selfie Liveness Test
                   </a>
                   <a
                     href="/docs#sessions"
-                    className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+                    className="flex items-center gap-2 px-3 py-2.5 sm:py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
-                    Sessions Documentation
+                    Sessions Docs
                   </a>
                 </div>
               </div>
@@ -426,9 +404,10 @@ export default function ApiDemo() {
         </div>
 
         {/* ID Types Reference */}
-        <div className="mt-12 bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h3 className="font-semibold text-gray-900 mb-4">Supported ID Types</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="mt-8 sm:mt-12 bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+          <h3 className="font-semibold text-gray-900 mb-3 sm:mb-4 text-base">Supported ID Types</h3>
+          <p className="text-sm text-gray-500 mb-3 sm:hidden">Tap to copy ID type</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3">
             {[
               { id: 'national-id', name: 'National ID' },
               { id: 'passport', name: 'Passport' },
@@ -441,12 +420,12 @@ export default function ApiDemo() {
             ].map((idType) => (
               <div
                 key={idType.id}
-                className="px-3 py-2 bg-gray-50 rounded-lg text-sm cursor-pointer hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                className="px-2 sm:px-3 py-2 bg-gray-50 rounded-lg text-sm cursor-pointer hover:bg-blue-50 hover:text-blue-700 active:bg-blue-100 transition-colors"
                 onClick={() => navigator.clipboard.writeText(idType.id)}
                 title="Click to copy"
               >
-                <code className="text-xs text-gray-500">{idType.id}</code>
-                <div className="font-medium mt-0.5">{idType.name}</div>
+                <code className="text-xs text-gray-500 break-all">{idType.id}</code>
+                <div className="font-medium mt-0.5 text-sm">{idType.name}</div>
               </div>
             ))}
           </div>
@@ -454,8 +433,8 @@ export default function ApiDemo() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-gray-200 mt-12">
-        <div className="max-w-7xl mx-auto px-6 py-6">
+      <footer className="border-t border-gray-200 mt-8 sm:mt-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
           <p className="text-sm text-gray-500 text-center">
             Identity Verification API Demo • <a href="/docs" className="text-blue-600 hover:underline">View Full Documentation</a>
           </p>
