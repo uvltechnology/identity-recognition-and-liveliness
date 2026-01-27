@@ -270,6 +270,52 @@ async function createServer() {
     }
   });
 
+  // ID Image Quality Check endpoint
+  app.post('/api/ai/id/quality-check', async (req, res) => {
+    try {
+      const { image } = req.body || {};
+      
+      if (!image) {
+        return res.status(400).json({ success: false, error: 'image is required' });
+      }
+
+      if (!geminiService.enabled) {
+        // If AI not available, skip quality check and allow processing
+        return res.json({
+          success: true,
+          result: {
+            isAcceptable: true,
+            confidence: 100,
+            issues: [],
+            details: {},
+            suggestion: 'AI quality check unavailable, proceeding with capture'
+          }
+        });
+      }
+
+      const result = await geminiService.checkIdImageQuality(image);
+      
+      if (result.error) {
+        // On error, allow processing but note the issue
+        return res.json({
+          success: true,
+          result: {
+            isAcceptable: true,
+            confidence: 50,
+            issues: [],
+            details: {},
+            suggestion: 'Quality check error, proceeding with capture'
+          }
+        });
+      }
+
+      return res.json({ success: true, result });
+    } catch (err) {
+      console.error('ID quality check error:', err);
+      return res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  });
+
   // OCR endpoints
   app.post('/api/ocr/text', upload.single('image'), async (req, res) => {
     try {

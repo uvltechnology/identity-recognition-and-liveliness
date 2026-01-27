@@ -596,7 +596,7 @@ export default function SelfieLivenessTest() {
     if (!canvas || !video) return;
 
     // Final face verification before capture
-    setFaceFeedback('� Final checking, hold on...');
+    setFaceFeedback('🔍 Final checking, hold on...');
     setFaceFeedbackType('info');
     
     try {
@@ -628,6 +628,43 @@ export default function SelfieLivenessTest() {
         return;
       }
 
+      // Capture image first
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+      const imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+      // AI Anti-Spoofing Check
+      setFaceFeedback('🤖 AI verifying real human...');
+      setFaceFeedbackType('info');
+
+      try {
+        const aiResponse = await fetch('/api/ai/face/liveness', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image: imageDataUrl,
+            livenessScore: livenessScoreRef.current,
+            movementDetected: blinkDetectedRef.current || expressionChangeRef.current,
+          }),
+        });
+
+        const aiResult = await aiResponse.json();
+
+        if (aiResult.success && aiResult.result) {
+          const { isLive, confidence, reason } = aiResult.result;
+
+          if (!isLive || confidence < 70) {
+            setFaceFeedback(`❌ Spoofing detected: ${reason || 'Please use a real face'}`);
+            setFaceFeedbackType('error');
+            centeredFrameCountRef.current = 0;
+            spoofDetectedRef.current = true;
+            return;
+          }
+        }
+      } catch (aiErr) {
+        console.warn('AI liveness check failed, proceeding with local checks:', aiErr);
+      }
+
       // All checks passed - capture!
       isRunningRef.current = false;
       if (faceDetectionIntervalRef.current) {
@@ -635,13 +672,9 @@ export default function SelfieLivenessTest() {
         faceDetectionIntervalRef.current = null;
       }
 
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0);
-      const imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
-
       setCapturedFace(imageDataUrl);
       setFaceVerified(true);
-      setFaceFeedback('✅ Verified!');
+      setFaceFeedback('✅ Verified! Real human confirmed');
       setFaceFeedbackType('success');
       setLivenessScore(100);
       setSteadySeconds(0);

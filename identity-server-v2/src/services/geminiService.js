@@ -565,6 +565,103 @@ class GeminiService {
       return { ...scanningResult, verified: false, error: err.message };
     }
   }
+
+  // ID Image Quality Check
+  async checkIdImageQuality(imageBase64) {
+    if (!this.enabled) {
+      return { error: 'Gemini API key not configured', disabled: true };
+    }
+
+    const system = [
+      'You are an ID document image quality analyzer. Analyze the provided image to check if it is suitable for ID verification processing.',
+      '',
+      'Return JSON: {',
+      '  "isAcceptable": boolean,',
+      '  "confidence": number,',
+      '  "issues": [string],',
+      '  "details": {',
+      '    "isCentered": boolean,',
+      '    "hasObstacles": boolean,',
+      '    "isBlurry": boolean,',
+      '    "hasLightReflection": boolean,',
+      '    "isIdVisible": boolean,',
+      '    "isFullyInFrame": boolean',
+      '  },',
+      '  "suggestion": string',
+      '}',
+      '',
+      'Check for these quality issues:',
+      '1. ID Card Centering - Is the ID card reasonably centered in the frame?',
+      '2. Obstacles/Blocking - Are there fingers, objects, or anything blocking important parts of the ID?',
+      '3. Blur/Focus - Is the image sharp and text readable, or is it blurry/out of focus?',
+      '4. Light Reflection/Glare - Is there strong light reflection, glare, or hotspots obscuring the ID?',
+      '5. ID Visibility - Is an actual ID card/document visible in the image?',
+      '6. Framing - Is the entire ID visible within the frame (not cropped)?',
+      '',
+      'isAcceptable should be true only if the ID is visible, reasonably centered, not significantly blocked, not too blurry, and has no major glare issues.',
+      'confidence: 0-100 (how confident you are about the quality assessment)',
+      'issues: array of specific problems found (empty if acceptable)',
+      'suggestion: brief advice for the user if issues found',
+      '',
+      'Return ONLY JSON, no prose.'
+    ].join('\n');
+
+    try {
+      let mimeType = 'image/jpeg';
+      let base64Data = imageBase64;
+      
+      if (imageBase64.startsWith('data:')) {
+        const match = imageBase64.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          mimeType = match[1];
+          base64Data = match[2];
+        }
+      }
+
+      if (this.debug) {
+        console.log(`[GeminiService][ID Quality Check] Using model: ${this.modelId}`);
+      }
+
+      const model = this.client.getGenerativeModel({
+        model: this.modelId,
+        systemInstruction: system
+      });
+
+      const result = await model.generateContent({
+        contents: [{
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: base64Data } },
+            { text: 'Analyze this ID document image for quality issues. Check centering, obstacles, blur, and light reflection.' }
+          ]
+        }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
+      });
+
+      const text = result?.response?.text?.() || '';
+      const trimmed = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+      
+      let parsed;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (e) {
+        const match = trimmed.match(/\{[\s\S]*\}/);
+        if (match) parsed = JSON.parse(match[0]);
+        else throw e;
+      }
+
+      return {
+        isAcceptable: parsed.isAcceptable === true,
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 50,
+        issues: Array.isArray(parsed.issues) ? parsed.issues : [],
+        details: parsed.details || {},
+        suggestion: parsed.suggestion || ''
+      };
+    } catch (err) {
+      console.error('[GeminiService] checkIdImageQuality error:', err.message);
+      return { error: 'ID image quality check failed', details: err.message };
+    }
+  }
 }
 
 export default GeminiService;

@@ -30,6 +30,12 @@ export default function IDVerificationTest() {
   const [aiResult, setAiResult] = useState(null);
   const [openaiResult, setOpenaiResult] = useState(null);
   const [verificationComplete, setVerificationComplete] = useState(false);
+  const [idTypeMismatch, setIdTypeMismatch] = useState(false);
+  const [detectedIdType, setDetectedIdType] = useState(null);
+  const [missingFields, setMissingFields] = useState([]);
+  const [fieldValidationFailed, setFieldValidationFailed] = useState(false);
+  const [imageQualityIssues, setImageQualityIssues] = useState([]);
+  const [imageQualityFailed, setImageQualityFailed] = useState(false);
 
   useEffect(() => {
     return () => stopCamera();
@@ -97,8 +103,37 @@ export default function IDVerificationTest() {
     const imageDataUrl = canvas.toDataURL('image/jpeg', 0.7);
 
     setCapturedImage(imageDataUrl);
-    stopCamera();
 
+    // AI Image Quality Check
+    setFeedback('🤖 AI checking image quality...');
+    setFeedbackType('info');
+
+    try {
+      const qualityRes = await fetchWithTimeout('/api/ai/id/quality-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imageDataUrl })
+      }, 15000);
+
+      const qualityData = await qualityRes.json();
+
+      if (qualityData.success && qualityData.result) {
+        const { isAcceptable, issues, suggestion, details } = qualityData.result;
+
+        if (!isAcceptable && issues && issues.length > 0) {
+          setImageQualityIssues(issues);
+          setImageQualityFailed(true);
+          setFeedback('Image quality issues detected');
+          setFeedbackType('error');
+          setIsProcessing(false);
+          return;
+        }
+      }
+    } catch (qualityErr) {
+      console.warn('AI quality check failed, proceeding:', qualityErr);
+    }
+
+    stopCamera();
     await processImage(imageDataUrl);
   };
 
@@ -123,6 +158,118 @@ export default function IDVerificationTest() {
       const data = await res.json();
       
       if (!data.success) throw new Error(data.error || 'Processing failed');
+
+      // Check if detected ID type matches selected ID type
+      const extractedIdType = (data.fields?.idType || '').toLowerCase().replace(/[\s-_]/g, '');
+      const selectedType = (selectedIdType || '').toLowerCase().replace(/[\s-_]/g, '');
+      
+      // Normalize ID type names for comparison
+      const normalizeIdType = (type) => {
+        const typeMap = {
+          // Philippine National ID aliases
+          'philippinenationalid': 'nationalid',
+          'philippineidentificationcard': 'nationalid',
+          'philippineid': 'nationalid',
+          'nationalid': 'nationalid',
+          'philsys': 'nationalid',
+          'philsysid': 'nationalid',
+          'philsyscard': 'nationalid',
+          'psa': 'nationalid',
+          'psaid': 'nationalid',
+          // Driver's License aliases
+          'driverslicense': 'driverlicense',
+          'driverlicense': 'driverlicense',
+          'driverslic': 'driverlicense',
+          'drivinglic': 'driverlicense',
+          'drivinglicense': 'driverlicense',
+          'ltolicense': 'driverlicense',
+          'lto': 'driverlicense',
+          // Passport aliases
+          'passport': 'passport',
+          'philippinepassport': 'passport',
+          'phpassport': 'passport',
+          // UMID aliases
+          'umid': 'umid',
+          'umidcard': 'umid',
+          'unifiedmultipurposeid': 'umid',
+          // PhilHealth aliases
+          'philhealth': 'philhealth',
+          'philhealthid': 'philhealth',
+          'philhealthcard': 'philhealth',
+          'philippinehealthinsurance': 'philhealth',
+          // TIN ID aliases
+          'tinid': 'tinid',
+          'tin': 'tinid',
+          'tincard': 'tinid',
+          'taxpayeridentificationnumber': 'tinid',
+          'taxid': 'tinid',
+          'bir': 'tinid',
+          'birid': 'tinid',
+          // Postal ID aliases
+          'postalid': 'postalid',
+          'postal': 'postalid',
+          'postalcard': 'postalid',
+          'phlpostid': 'postalid',
+          'philpostid': 'postalid',
+          // Pag-IBIG aliases
+          'pagibig': 'pagibig',
+          'pagibigid': 'pagibig',
+          'pagibigcard': 'pagibig',
+          'hdmf': 'pagibig',
+          'hdmfid': 'pagibig',
+        };
+        return typeMap[type] || type;
+      };
+
+      const normalizedExtracted = normalizeIdType(extractedIdType);
+      const normalizedSelected = normalizeIdType(selectedType);
+
+      if (normalizedExtracted && normalizedSelected && normalizedExtracted !== normalizedSelected) {
+        setDetectedIdType(data.fields?.idType || 'Unknown');
+        setIdTypeMismatch(true);
+        setFeedback('ID type mismatch detected');
+        setFeedbackType('error');
+        setIsProcessing(false);
+        return;
+      }
+
+      // Define required fields for each ID type
+      const requiredFieldsByIdType = {
+        'national-id': ['fullName', 'idNumber', 'dateOfBirth'],
+        'driver-license': ['fullName', 'idNumber', 'dateOfBirth'],
+        'passport': ['fullName', 'idNumber', 'dateOfBirth', 'nationality'],
+        'umid': ['fullName', 'idNumber', 'dateOfBirth'],
+        'philhealth': ['fullName', 'idNumber'],
+        'tin-id': ['fullName', 'idNumber'],
+        'postal-id': ['fullName', 'idNumber'],
+        'pagibig': ['fullName', 'idNumber'],
+      };
+
+      // Get required fields for selected ID type
+      const requiredFields = requiredFieldsByIdType[selectedIdType] || ['fullName', 'idNumber'];
+      const fields = data.fields || {};
+      
+      // Check for missing required fields
+      const missing = requiredFields.filter(field => {
+        const value = fields[field] || fields[field.toLowerCase()];
+        // Also check alternative field names
+        if (field === 'fullName' && !value) {
+          return !(fields.name || fields.firstName || fields.lastName);
+        }
+        if (field === 'dateOfBirth' && !value) {
+          return !fields.birthDate;
+        }
+        return !value || value.trim() === '';
+      });
+
+      if (missing.length > 0) {
+        setMissingFields(missing);
+        setFieldValidationFailed(true);
+        setFeedback('Required fields not detected');
+        setFeedbackType('error');
+        setIsProcessing(false);
+        return;
+      }
 
       // Store results
       setOcrResult({ text: data.rawText || data.basicText?.text || '' });
@@ -160,6 +307,23 @@ export default function IDVerificationTest() {
     setFeedback('Press Start to scan your ID');
     setFeedbackType('info');
     setIsProcessing(false);
+  };
+
+  const handleRecapture = () => {
+    setCapturedImage(null);
+    setOcrResult(null);
+    setAiResult(null);
+    setOpenaiResult(null);
+    setIdTypeMismatch(false);
+    setDetectedIdType(null);
+    setFieldValidationFailed(false);
+    setMissingFields([]);
+    setImageQualityFailed(false);
+    setImageQualityIssues([]);
+    setFeedback('Position your ID within the frame');
+    setFeedbackType('info');
+    setIsProcessing(false);
+    startCamera();
   };
 
   const renderField = (label, value) => {
@@ -250,6 +414,271 @@ export default function IDVerificationTest() {
     );
   }
 
+  // Image Quality Failed View
+  if (imageQualityFailed && capturedImage) {
+    const issueLabels = {
+      'not_centered': 'ID is not centered in frame',
+      'has_obstacles': 'Obstacles blocking the ID',
+      'is_blurry': 'Image is blurry or out of focus',
+      'has_glare': 'Light reflection or glare detected',
+      'too_dark': 'Image is too dark',
+      'too_bright': 'Image is overexposed',
+      'partial_visible': 'ID is partially cut off',
+      'tilted': 'ID is tilted or at an angle',
+    };
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-orange-50 to-amber-100 flex flex-col">
+        <div className="bg-white shadow-sm sticky top-0 z-10">
+          <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
+            <a href="/" className="p-2 -ml-2 text-gray-600">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </a>
+            <h1 className="font-semibold text-gray-900">Image Quality Issue</h1>
+            <div className="w-10" />
+          </div>
+        </div>
+
+        <div className="flex-1 flex flex-col items-center justify-center p-6">
+          <div className="w-full max-w-md">
+            <div className="text-center mb-6">
+              <div className="w-20 h-20 mx-auto bg-orange-500 rounded-full flex items-center justify-center mb-4 shadow-lg">
+                <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <h1 className="text-2xl font-bold text-gray-900">Image Quality Issue</h1>
+              <p className="text-gray-600 mt-2">Please retake the photo with better quality</p>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-xl p-4 mb-6">
+              <div className="text-sm font-semibold text-gray-700 mb-3">Issues Detected:</div>
+              <div className="space-y-2">
+                {imageQualityIssues.map((issue, index) => (
+                  <div key={index} className="flex items-center gap-2 text-orange-600">
+                    <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <span className="text-sm">{issueLabels[issue] || issue}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+              <div className="flex gap-3">
+                <div className="text-blue-500 flex-shrink-0">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="font-semibold text-blue-800 text-sm">Tips for better capture</div>
+                  <div className="text-blue-700 text-xs mt-1">
+                    • Center the ID within the camera frame<br/>
+                    • Use good, even lighting<br/>
+                    • Avoid glare and reflections<br/>
+                    • Keep the camera steady and focused
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={handleRecapture}
+              className="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              Recapture ID
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ID Type Mismatch View
+  if (idTypeMismatch && capturedImage) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-100 flex flex-col">
+        <div className="bg-white shadow-sm sticky top-0 z-10">
+          <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
+            <a href="/" className="p-2 -ml-2 text-gray-600">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </a>
+            <h1 className="font-semibold text-gray-900">Verification Failed</h1>
+            <div className="w-10" />
+          </div>
+        </div>
+
+        <div className="flex-1 flex flex-col items-center justify-center p-6">
+          <div className="w-full max-w-md">
+            <div className="text-center mb-6">
+              <div className="w-20 h-20 mx-auto bg-red-500 rounded-full flex items-center justify-center mb-4 shadow-lg">
+                <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </div>
+              <h1 className="text-2xl font-bold text-gray-900">ID Type Mismatch</h1>
+              <p className="text-gray-600 mt-2">The scanned ID does not match your selection</p>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-xl p-4 mb-6">
+              <div className="space-y-3">
+                <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                  <span className="text-gray-500 text-sm">Selected ID Type</span>
+                  <span className="text-blue-600 font-semibold text-sm">{getIdTypeLabel(selectedIdType)}</span>
+                </div>
+                <div className="flex justify-between items-center py-2">
+                  <span className="text-gray-500 text-sm">Detected ID Type</span>
+                  <span className="text-red-600 font-semibold text-sm">{detectedIdType}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
+              <div className="flex gap-3">
+                <div className="text-amber-500 flex-shrink-0">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="font-semibold text-amber-800 text-sm">What to do?</div>
+                  <div className="text-amber-700 text-xs mt-1">
+                    Please make sure you selected the correct ID type or scan the ID that matches your selection.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={handleRecapture}
+                className="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Recapture ID
+              </button>
+              <button
+                onClick={() => { setIdTypeMismatch(false); setSelectedIdType(null); setCapturedImage(null); }}
+                className="w-full py-3 bg-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-300 transition"
+              >
+                Change ID Type
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Field Validation Failed View
+  if (fieldValidationFailed && capturedImage) {
+    const fieldLabels = {
+      fullName: 'Full Name',
+      idNumber: 'ID Number',
+      dateOfBirth: 'Date of Birth',
+      nationality: 'Nationality',
+      address: 'Address',
+      sex: 'Sex',
+      expiryDate: 'Expiry Date',
+      issueDate: 'Issue Date',
+    };
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-100 flex flex-col">
+        <div className="bg-white shadow-sm sticky top-0 z-10">
+          <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
+            <a href="/" className="p-2 -ml-2 text-gray-600">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </a>
+            <h1 className="font-semibold text-gray-900">Verification Failed</h1>
+            <div className="w-10" />
+          </div>
+        </div>
+
+        <div className="flex-1 flex flex-col items-center justify-center p-6">
+          <div className="w-full max-w-md">
+            <div className="text-center mb-6">
+              <div className="w-20 h-20 mx-auto bg-red-500 rounded-full flex items-center justify-center mb-4 shadow-lg">
+                <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <h1 className="text-2xl font-bold text-gray-900">Missing Required Fields</h1>
+              <p className="text-gray-600 mt-2">Could not extract all required information from the ID</p>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-xl p-4 mb-6">
+              <div className="text-sm font-semibold text-gray-700 mb-3">Missing Fields:</div>
+              <div className="space-y-2">
+                {missingFields.map((field, index) => (
+                  <div key={index} className="flex items-center gap-2 text-red-600">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    <span className="text-sm">{fieldLabels[field] || field}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
+              <div className="flex gap-3">
+                <div className="text-amber-500 flex-shrink-0">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="font-semibold text-amber-800 text-sm">Tips for better results</div>
+                  <div className="text-amber-700 text-xs mt-1">
+                    • Ensure good lighting without glare<br/>
+                    • Keep the ID flat and fully visible<br/>
+                    • Make sure text is clear and readable
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={handleRecapture}
+                className="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Recapture ID
+              </button>
+              <button
+                onClick={() => { setFieldValidationFailed(false); setSelectedIdType(null); setCapturedImage(null); setMissingFields([]); }}
+                className="w-full py-3 bg-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-300 transition"
+              >
+                Change ID Type
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Results View
   if (verificationComplete && capturedImage) {
     const data = aiResult?.data || aiResult || {};
@@ -296,7 +725,6 @@ export default function IDVerificationTest() {
               Extracted Information
             </h2>
             <div className="divide-y divide-gray-100">
-              {renderField('ID Type', data.idType)}
               {renderField('Full Name', data.fullName || data.name)}
               {renderField('First Name', data.firstName)}
               {renderField('Middle Name', data.middleName)}
