@@ -143,6 +143,8 @@ const EndpointTester = ({
 
 const SessionCard = ({ session, type }) => {
   const [showIframe, setShowIframe] = useState(false);
+  const [webhookStatus, setWebhookStatus] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   const getSessionUrl = () => {
     if (type === 'id') {
@@ -155,8 +157,38 @@ const SessionCard = ({ session, type }) => {
     return session.sessionUrl || session.embedUrl;
   };
 
-  const getEmbedUrl = () => {
-    return session.embedUrl || `/embed/session/${session.sessionId}`;
+  const checkWebhookStatus = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/webhooks/status/${session.sessionId}`);
+      const data = await res.json();
+      setWebhookStatus(data.success ? data.data : null);
+    } catch (e) {
+      console.error('Failed to check webhook status:', e);
+    }
+    setLoading(false);
+  };
+
+  const triggerWebhook = async (type) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/webhooks/trigger/${type}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          sessionId: session.sessionId,
+          reason: type === 'failed' ? 'Manual test trigger' : undefined
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.redirectUrl) {
+        window.open(data.redirectUrl, '_blank');
+      }
+      await checkWebhookStatus();
+    } catch (e) {
+      console.error('Failed to trigger webhook:', e);
+    }
+    setLoading(false);
   };
 
   return (
@@ -170,6 +202,20 @@ const SessionCard = ({ session, type }) => {
           }`}>
             {type === 'id' ? 'ID Verification' : type === 'selfie' ? 'Selfie Liveness' : 'Combined Flow'}
           </span>
+          {session.webhookRegistered && (
+            <span className="px-2 py-1 text-xs font-medium rounded bg-yellow-100 text-yellow-700">
+              Webhook
+            </span>
+          )}
+          {webhookStatus && (
+            <span className={`px-2 py-1 text-xs font-medium rounded ${
+              webhookStatus.status === 'success' ? 'bg-green-100 text-green-700' :
+              webhookStatus.status === 'failed' ? 'bg-red-100 text-red-700' :
+              'bg-gray-100 text-gray-700'
+            }`}>
+              {webhookStatus.status}
+            </span>
+          )}
         </div>
         <span className="text-sm text-gray-500">
           {new Date().toLocaleTimeString()}
@@ -187,6 +233,31 @@ const SessionCard = ({ session, type }) => {
             <code className="px-2 py-0.5 bg-gray-100 rounded text-gray-700 text-sm break-all">{session.selfieSessionId}</code>
           </div>
         )}
+      </div>
+
+      {/* Webhook Actions */}
+      <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-gray-100">
+        <button
+          onClick={() => triggerWebhook('success')}
+          disabled={loading}
+          className="px-2 py-1 bg-green-100 hover:bg-green-200 text-green-700 text-xs font-medium rounded transition-colors disabled:opacity-50"
+        >
+          ✓ Success
+        </button>
+        <button
+          onClick={() => triggerWebhook('failed')}
+          disabled={loading}
+          className="px-2 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-medium rounded transition-colors disabled:opacity-50"
+        >
+          ✕ Failed
+        </button>
+        <button
+          onClick={checkWebhookStatus}
+          disabled={loading}
+          className="px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium rounded transition-colors disabled:opacity-50"
+        >
+          🔄 Status
+        </button>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-2 mt-4">
@@ -238,22 +309,28 @@ export default function ApiDemo() {
     setCreatedSessions(prev => [{ ...data, type, createdAt: new Date() }, ...prev]);
   };
 
-  // Default request bodies with placeholder URL (will be updated on client)
+  // Default request bodies with webhook URLs
   const getIdVerificationBody = () => ({
     idType: "national-id",
     successUrl: baseUrl ? `${baseUrl}/demo/success` : "/demo/success",
+    failureUrl: baseUrl ? `${baseUrl}/demo/failed` : "/demo/failed",
+    webhookUrl: baseUrl ? `${baseUrl}/api/webhooks/receive` : "/api/webhooks/receive",
     testMode: false,
     authRequired: false
   });
 
   const getSelfieBody = () => ({
     successUrl: baseUrl ? `${baseUrl}/demo/success` : "/demo/success",
+    failureUrl: baseUrl ? `${baseUrl}/demo/failed` : "/demo/failed",
+    webhookUrl: baseUrl ? `${baseUrl}/api/webhooks/receive` : "/api/webhooks/receive",
     testMode: false
   });
 
   const getCombinedBody = () => ({
     idType: "national-id",
     successUrl: baseUrl ? `${baseUrl}/demo/success` : "/demo/success",
+    failureUrl: baseUrl ? `${baseUrl}/demo/failed` : "/demo/failed",
+    webhookUrl: baseUrl ? `${baseUrl}/api/webhooks/receive` : "/api/webhooks/receive",
     testMode: false,
     authRequired: false
   });

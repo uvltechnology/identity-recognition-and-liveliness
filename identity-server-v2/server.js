@@ -15,9 +15,20 @@ import { extractFieldsUsingOpenAI } from './src/services/openaiExtractor.js';
 import { scanningExtract, fallbackExtract, mergeWithFallback } from './src/services/fallbackExtractor.js';
 import sessionStore from './src/services/sessionStore.js';
 import storageModule from './src/services/storage.js';
+import webhookService from './src/services/webhookService.js';
 
 const { getSession, setSession, deleteSession, makeSessionId, cleanupTempForSession, initRedisClient } = sessionStore;
 const { uploadImageToStorage, deleteImageFromStorage, getImageUrlFromRef } = storageModule;
+const { 
+  initWebhookTables, 
+  registerWebhook, 
+  triggerVerificationSuccess, 
+  triggerVerificationFailed,
+  triggerSessionExpired,
+  getWebhookStatus,
+  listWebhooks,
+  updateWebhookStatus
+} = webhookService;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProduction = process.env.NODE_ENV === 'production';
@@ -43,6 +54,13 @@ const ocrService = new OCRService();
       await initRedisClient(redisModule.createClient, redisUrl);
     }
   } catch (e) { /* fallback to in-memory */ }
+
+  // Initialize webhook tables
+  try {
+    await initWebhookTables();
+  } catch (e) {
+    console.warn('Webhook tables initialization skipped:', e.message);
+  }
 })();
 
 // Multer config for file uploads
@@ -574,13 +592,25 @@ async function createServer() {
       const embedUrl = `${origin}/embed/session/${sessionId}`;
       const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
 
+      // Register webhook for this session
+      if (payload.webhookUrl || payload.successUrl || payload.failureUrl) {
+        await registerWebhook({
+          sessionId,
+          sessionType: 'id',
+          webhookUrl: payload.webhookUrl,
+          successUrl: payload.successUrl,
+          failureUrl: payload.failureUrl
+        });
+      }
+
       console.log("Created ID verification session:", sessionId, "idType:", payload.idType || 'national-id');
       res.json({
         success: true,
         sessionId,
         sessionUrl,
         embedUrl,
-        expiresAt
+        expiresAt,
+        webhookRegistered: !!(payload.webhookUrl || payload.successUrl || payload.failureUrl)
       });
     } catch (e) {
       console.error('Create ID verification session error:', e);
@@ -611,12 +641,24 @@ async function createServer() {
       const sessionUrl = `${origin}/session/selfieliveness/${sessionId}`;
       const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
 
+      // Register webhook for this session
+      if (payload.webhookUrl || payload.successUrl || payload.failureUrl) {
+        await registerWebhook({
+          sessionId,
+          sessionType: 'selfie',
+          webhookUrl: payload.webhookUrl,
+          successUrl: payload.successUrl,
+          failureUrl: payload.failureUrl
+        });
+      }
+
       console.log("Created selfie liveness session:", sessionId);
       res.json({
         success: true,
         sessionId,
         sessionUrl,
-        expiresAt
+        expiresAt,
+        webhookRegistered: !!(payload.webhookUrl || payload.successUrl || payload.failureUrl)
       });
     } catch (e) {
       console.error('Create selfie session error:', e);
@@ -662,6 +704,17 @@ async function createServer() {
       };
       await setSession(selfieSessionId, selfieSessionObj, ttl);
 
+      // Register webhook for the combined session (using ID session as primary)
+      if (payload.webhookUrl || payload.successUrl || payload.failureUrl) {
+        await registerWebhook({
+          sessionId: idSessionId,
+          sessionType: 'combined',
+          webhookUrl: payload.webhookUrl,
+          successUrl: payload.successUrl,
+          failureUrl: payload.failureUrl
+        });
+      }
+
       const sessionUrl = `${origin}/session/idverification/${idSessionId}`;
       const selfieSessionUrl = `${origin}/session/selfieliveness/${selfieSessionId}`;
       const embedUrl = `${origin}/embed/session/${idSessionId}`;
@@ -676,7 +729,8 @@ async function createServer() {
         selfieSessionUrl,
         embedUrl,
         nextStep: 'selfie',
-        expiresAt
+        expiresAt,
+        webhookRegistered: !!(payload.webhookUrl || payload.successUrl || payload.failureUrl)
       });
     } catch (e) {
       console.error('Create combined session error:', e);
@@ -688,6 +742,95 @@ async function createServer() {
   app.post('/api/verify/id/create', createIDVerificationSessionHandler);
   app.post('/api/verify/selfie/create', createSelfieSessionHandler);
   app.post('/api/verify/combined/create', createCombinedVerificationSessionHandler);
+
+  // ===== Webhook API Routes =====
+
+  // Register webhook for a session
+  app.post('/api/webhooks/register', async (req, res) => {
+    try {
+      const { sessionId, sessionType, webhookUrl, successUrl, failureUrl } = req.body;
+      if (!sessionId) {
+        return res.status(400).json({ success: false, error: 'sessionId is required' });
+      }
+      const result = await registerWebhook({ sessionId, sessionType, webhookUrl, successUrl, failureUrl });
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Trigger verification success
+  app.post('/api/webhooks/trigger/success', async (req, res) => {
+    try {
+      const { sessionId, data } = req.body;
+      if (!sessionId) {
+        return res.status(400).json({ success: false, error: 'sessionId is required' });
+      }
+      const result = await triggerVerificationSuccess(sessionId, data || {});
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Trigger verification failed
+  app.post('/api/webhooks/trigger/failed', async (req, res) => {
+    try {
+      const { sessionId, reason, data } = req.body;
+      if (!sessionId) {
+        return res.status(400).json({ success: false, error: 'sessionId is required' });
+      }
+      const result = await triggerVerificationFailed(sessionId, reason || 'Verification failed', data || {});
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Trigger session expired
+  app.post('/api/webhooks/trigger/expired', async (req, res) => {
+    try {
+      const { sessionId } = req.body;
+      if (!sessionId) {
+        return res.status(400).json({ success: false, error: 'sessionId is required' });
+      }
+      const result = await triggerSessionExpired(sessionId);
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Get webhook status
+  app.get('/api/webhooks/status/:sessionId', async (req, res) => {
+    try {
+      const status = await getWebhookStatus(req.params.sessionId);
+      if (!status) {
+        return res.status(404).json({ success: false, error: 'Webhook not found' });
+      }
+      res.json({ success: true, data: status });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // List all webhooks
+  app.get('/api/webhooks/list', async (req, res) => {
+    try {
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 20;
+      const result = await listWebhooks(page, limit);
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Webhook receiver endpoint (for testing)
+  app.post('/api/webhooks/receive', (req, res) => {
+    console.log('[Webhook Received]:', JSON.stringify(req.body, null, 2));
+    res.json({ received: true, timestamp: new Date().toISOString() });
+  });
 
   // Get session info
   app.get('/api/verify/session/:id', async (req, res) => {
@@ -733,15 +876,47 @@ async function createServer() {
       const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 3600);
       await setSession(id, updated, ttl);
 
-      // Fire webhooks for terminal states
+      // Fire webhooks for terminal states using new webhook service
       const status = (updated.status || '').toLowerCase();
       const p = updated.payload || {};
-      if (['done', 'completed', 'success'].includes(status) && p.successWebhook) {
-        safePostWebhook(p.successWebhook, { sessionId: id, status: updated.status, result: updated.result });
+
+      if (['done', 'completed', 'success'].includes(status)) {
+        // Trigger success webhook
+        const webhookResult = await triggerVerificationSuccess(id, {
+          fields: updated.result?.fields || updated.result,
+          status: updated.status,
+          finishedAt: updated.finishedAt
+        });
+        
+        // Also fire legacy webhooks if configured
+        if (p.successWebhook) {
+          safePostWebhook(p.successWebhook, { sessionId: id, status: updated.status, result: updated.result });
+        }
+
+        // Include redirect URL in response
+        if (webhookResult.redirectUrl) {
+          updated.redirectUrl = webhookResult.redirectUrl;
+        }
       }
-      if (['cancelled', 'canceled', 'failed'].includes(status) && p.cancelWebhook) {
-        safePostWebhook(p.cancelWebhook, { sessionId: id, status: updated.status, result: updated.result });
+
+      if (['cancelled', 'canceled', 'failed'].includes(status)) {
+        // Trigger failed webhook
+        const webhookResult = await triggerVerificationFailed(id, payload.reason || 'Verification failed', {
+          status: updated.status,
+          result: updated.result
+        });
+        
+        // Also fire legacy webhooks if configured
+        if (p.cancelWebhook) {
+          safePostWebhook(p.cancelWebhook, { sessionId: id, status: updated.status, result: updated.result });
+        }
+
+        // Include redirect URL in response
+        if (webhookResult.redirectUrl) {
+          updated.redirectUrl = webhookResult.redirectUrl;
+        }
       }
+
       if (['done', 'completed', 'success', 'cancelled', 'canceled', 'failed'].includes(status)) {
         cleanupTempForSession(id, { deleteImageFromStorage }).catch(() => { });
       }
