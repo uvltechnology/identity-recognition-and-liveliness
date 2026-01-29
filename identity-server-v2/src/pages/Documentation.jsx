@@ -1,8 +1,19 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Header from '../components/Header';
+
+const MAX_CODE_HEIGHT = 280; // Max height in pixels before showing "View full code"
 
 const CodeBlock = ({ code }) => {
   const [copied, setCopied] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [needsExpand, setNeedsExpand] = useState(false);
+  const codeRef = useRef(null);
+
+  useEffect(() => {
+    if (codeRef.current) {
+      setNeedsExpand(codeRef.current.scrollHeight > MAX_CODE_HEIGHT);
+    }
+  }, [code]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(code);
@@ -12,46 +23,135 @@ const CodeBlock = ({ code }) => {
 
   return (
     <div className="relative group">
-      <pre className="bg-gray-900 text-gray-100 p-3 sm:p-4 rounded-lg overflow-x-auto text-sm">
-        <code>{code}</code>
-      </pre>
+      <div 
+        className={`relative ${!isExpanded && needsExpand ? 'overflow-hidden' : ''}`}
+        style={{ maxHeight: !isExpanded && needsExpand ? `${MAX_CODE_HEIGHT}px` : 'none' }}
+      >
+        <pre 
+          ref={codeRef}
+          className="bg-gray-900 text-gray-100 p-3 sm:p-4 rounded-lg overflow-x-auto text-sm"
+        >
+          <code>{code}</code>
+        </pre>
+        {/* Gradient fade overlay when collapsed */}
+        {!isExpanded && needsExpand && (
+          <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-gray-900 to-transparent rounded-b-lg pointer-events-none" />
+        )}
+      </div>
+      {/* Copy button */}
       <button
         onClick={handleCopy}
         className="absolute top-2 right-2 px-2 py-1 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
       >
         {copied ? 'Copied!' : 'Copy'}
       </button>
+      {/* View full code / Collapse button */}
+      {needsExpand && (
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="w-full mt-1 py-1.5 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors flex items-center justify-center gap-1"
+        >
+          {isExpanded ? (
+            <>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+              </svg>
+              Collapse code
+            </>
+          ) : (
+            <>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+              View full code
+            </>
+          )}
+        </button>
+      )}
     </div>
   );
 };
 
+// Tabbed code block component for multiple language examples
+const TabbedCodeBlock = ({ tabs }) => {
+  const [activeTab, setActiveTab] = useState(0);
+
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      {/* Tab buttons */}
+      <div className="flex bg-gray-100 border-b border-gray-200">
+        {tabs.map((tab, index) => (
+          <button
+            key={tab.label}
+            onClick={() => setActiveTab(index)}
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === index
+                ? 'bg-white text-gray-900 border-b-2 border-blue-500 -mb-px'
+                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+            }`}
+          >
+            <div className={`w-5 h-5 rounded flex items-center justify-center text-xs font-bold ${tab.iconBg}`}>
+              {tab.icon}
+            </div>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      {/* Active tab content */}
+      <div className="p-0">
+        <CodeBlock code={tabs[activeTab].code} />
+      </div>
+    </div>
+  );
+};
+
+// Accordion-style endpoint card
 const EndpointCard = ({ method, path, description, requestBody, responseBody }) => {
+  const [isOpen, setIsOpen] = useState(false);
   const methodColors = {
     GET: 'bg-green-100 text-green-700',
     POST: 'bg-blue-100 text-blue-700',
   };
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden mb-4">
-      <div className="bg-gray-50 px-3 sm:px-4 py-3 flex flex-wrap items-center gap-2 border-b border-gray-200">
-        <span className={`px-2 py-1 rounded text-sm font-bold ${methodColors[method]}`}>{method}</span>
-        <code className="text-sm font-mono text-gray-800 break-all">{path}</code>
-      </div>
-      <div className="p-3 sm:p-4">
-        <p className="text-gray-600 mb-3 text-sm">{description}</p>
-        {requestBody && (
-          <div className="mb-3">
-            <h4 className="text-xs font-semibold text-gray-500 mb-1">Request</h4>
-            <CodeBlock code={requestBody} />
-          </div>
-        )}
-        {responseBody && (
-          <div>
-            <h4 className="text-xs font-semibold text-gray-500 mb-1">Response</h4>
-            <CodeBlock code={responseBody} />
-          </div>
-        )}
-      </div>
+    <div className="border border-gray-200 rounded-lg overflow-hidden mb-3">
+      {/* Accordion Header - Always visible */}
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full bg-gray-50 px-3 sm:px-4 py-3 flex items-center justify-between gap-2 hover:bg-gray-100 transition-colors"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`px-2 py-1 rounded text-sm font-bold ${methodColors[method]}`}>{method}</span>
+          <code className="text-sm font-mono text-gray-800 break-all">{path}</code>
+        </div>
+        <svg 
+          className={`w-5 h-5 text-gray-500 transition-transform flex-shrink-0 ${isOpen ? 'rotate-180' : ''}`} 
+          fill="none" 
+          stroke="currentColor" 
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      
+      {/* Accordion Content - Collapsible */}
+      {isOpen && (
+        <div className="p-3 sm:p-4 border-t border-gray-200 bg-white">
+          <p className="text-gray-600 mb-3 text-sm">{description}</p>
+          {requestBody && (
+            <div className="mb-3">
+              <h4 className="text-xs font-semibold text-gray-500 mb-1">Request</h4>
+              <CodeBlock code={requestBody} />
+            </div>
+          )}
+          {responseBody && (
+            <div>
+              <h4 className="text-xs font-semibold text-gray-500 mb-1">Response</h4>
+              <CodeBlock code={responseBody} />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -257,14 +357,225 @@ const embedUrl = await createVerificationSession();
   const { identityOCR } = event.data;
   if (!identityOCR) return;
   
-  if (identityOCR.action === 'completed') {
-    console.log('Result:', identityOCR.result);
-  }
-  if (identityOCR.action === 'failed') {
-    console.log('Failed:', identityOCR.reason);
+  switch (identityOCR.action) {
+    case 'verification_success':
+      console.log('Success:', identityOCR.result);
+      break;
+    case 'verification_failed':
+      console.log('Failed:', identityOCR.reason);
+      break;
+    case 'verification_cancelled':
+      console.log('Cancelled:', identityOCR.reason);
+      break;
   }
 });`} />
             </div>
+          </div>
+        </section>
+
+        {/* Iframe Events Section */}
+        <section id="iframe-events" className="mb-10 scroll-mt-20">
+          <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Iframe Parent Communication</h2>
+          <p className="text-gray-600 mb-4 text-sm">
+            When embedded in an iframe, the verification component sends postMessage events to the parent window 
+            for success, failure, and cancellation states.
+          </p>
+
+          {/* Event Types */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+            <h3 className="font-semibold text-gray-900 mb-3">Event Actions</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left px-3 py-2 font-medium text-gray-700">Action</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-700">Status</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-700">Description</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  <tr>
+                    <td className="px-3 py-2"><code className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs">verification_success</code></td>
+                    <td className="px-3 py-2"><code className="text-xs">success</code></td>
+                    <td className="px-3 py-2 text-gray-600">Verification completed successfully</td>
+                  </tr>
+                  <tr>
+                    <td className="px-3 py-2"><code className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs">verification_failed</code></td>
+                    <td className="px-3 py-2"><code className="text-xs">failed</code></td>
+                    <td className="px-3 py-2 text-gray-600">Verification failed (face mismatch, OCR error, etc.)</td>
+                  </tr>
+                  <tr>
+                    <td className="px-3 py-2"><code className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs">verification_cancelled</code></td>
+                    <td className="px-3 py-2"><code className="text-xs">cancelled</code></td>
+                    <td className="px-3 py-2 text-gray-600">User cancelled (declined consent, closed window)</td>
+                  </tr>
+                  <tr>
+                    <td className="px-3 py-2"><code className="bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded text-xs">verification_problem</code></td>
+                    <td className="px-3 py-2"><code className="text-xs">warning</code></td>
+                    <td className="px-3 py-2 text-gray-600">Non-fatal issue (camera problem, lighting, etc.)</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Payload Structure */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+            <h3 className="font-semibold text-gray-900 mb-3">Message Payload Structure</h3>
+            <CodeBlock code={`// Success payload
+{
+  identityOCR: {
+    action: 'verification_success',
+    status: 'success',
+    session: 'sess_abc123',
+    verificationType: 'id' | 'selfie' | 'combined',
+    result: {
+      fields: { firstName, lastName, idNumber, ... },
+      faceMatch: { match: true, similarity: 0.85 }  // selfie only
+    },
+    data: { ... }  // Extracted ID fields
+  }
+}
+
+// Failure payload
+{
+  identityOCR: {
+    action: 'verification_failed',
+    status: 'failed',
+    session: 'sess_abc123',
+    verificationType: 'selfie',
+    reason: 'face_mismatch',
+    details: { similarity: 0.25, threshold: 0.30 }
+  }
+}
+
+// Cancelled payload
+{
+  identityOCR: {
+    action: 'verification_cancelled',
+    status: 'cancelled',
+    session: 'sess_abc123',
+    verificationType: 'id',
+    reason: 'consent_declined'
+  }
+}`} />
+          </div>
+
+          {/* Failure Reasons */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+            <h3 className="font-semibold text-gray-900 mb-3">Failure Reasons</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left px-3 py-2 font-medium text-gray-700">Reason</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-700">Verification Type</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-700">Description</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  <tr>
+                    <td className="px-3 py-2"><code className="text-xs">face_mismatch</code></td>
+                    <td className="px-3 py-2 text-gray-600">Selfie</td>
+                    <td className="px-3 py-2 text-gray-600">Face doesn't match the ID photo</td>
+                  </tr>
+                  <tr>
+                    <td className="px-3 py-2"><code className="text-xs">id_type_mismatch</code></td>
+                    <td className="px-3 py-2 text-gray-600">ID</td>
+                    <td className="px-3 py-2 text-gray-600">Detected ID type doesn't match expected</td>
+                  </tr>
+                  <tr>
+                    <td className="px-3 py-2"><code className="text-xs">missing_required_fields</code></td>
+                    <td className="px-3 py-2 text-gray-600">ID</td>
+                    <td className="px-3 py-2 text-gray-600">Required fields not extracted from ID</td>
+                  </tr>
+                  <tr>
+                    <td className="px-3 py-2"><code className="text-xs">processing_error</code></td>
+                    <td className="px-3 py-2 text-gray-600">All</td>
+                    <td className="px-3 py-2 text-gray-600">Server-side processing error</td>
+                  </tr>
+                  <tr>
+                    <td className="px-3 py-2"><code className="text-xs">consent_declined</code></td>
+                    <td className="px-3 py-2 text-gray-600">All</td>
+                    <td className="px-3 py-2 text-gray-600">User declined camera consent</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Complete Example */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+            <h3 className="font-semibold text-gray-900 mb-3">Complete Event Handler Example</h3>
+            <CodeBlock code={`// Complete parent window event handler
+window.addEventListener('message', (event) => {
+  // Security: verify origin
+  if (event.origin !== 'https://identity.logica.dev') return;
+  
+  const { identityOCR } = event.data;
+  if (!identityOCR) return;
+  
+  const { action, status, session, reason, result, details, verificationType } = identityOCR;
+  
+  switch (action) {
+    case 'verification_success':
+      console.log('✅ Verification successful!');
+      console.log('Session:', session);
+      console.log('Type:', verificationType);
+      console.log('Data:', result);
+      
+      // Close the iframe or redirect
+      document.getElementById('verification-iframe').remove();
+      showSuccessMessage('Identity verified!');
+      break;
+      
+    case 'verification_failed':
+      console.log('❌ Verification failed');
+      console.log('Reason:', reason);
+      console.log('Details:', details);
+      
+      // Show error and allow retry
+      showErrorMessage(getErrorMessage(reason));
+      break;
+      
+    case 'verification_cancelled':
+      console.log('⚠️ User cancelled verification');
+      console.log('Reason:', reason);
+      
+      // Clean up and show cancellation message
+      document.getElementById('verification-iframe').remove();
+      showMessage('Verification was cancelled');
+      break;
+      
+    case 'verification_problem':
+      console.log('⚠️ Issue detected:', identityOCR.message);
+      // Optionally show warning to user
+      break;
+  }
+});
+
+function getErrorMessage(reason) {
+  const messages = {
+    'face_mismatch': 'Face does not match the ID photo',
+    'id_type_mismatch': 'Wrong ID type detected',
+    'missing_required_fields': 'Could not read all required ID fields',
+    'processing_error': 'An error occurred, please try again',
+    'consent_declined': 'Camera access is required for verification'
+  };
+  return messages[reason] || 'Verification failed';
+}`} />
+          </div>
+
+          {/* Best Practices */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <h3 className="font-semibold text-blue-900 mb-2">💡 Best Practices</h3>
+            <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+              <li>Always verify the event origin matches your expected domain</li>
+              <li>Handle all action types (success, failed, cancelled)</li>
+              <li>Provide clear user feedback for each state</li>
+              <li>Use webhooks as backup for critical verification flows</li>
+              <li>Store session IDs to correlate iframe events with server data</li>
+            </ul>
           </div>
         </section>
 
@@ -332,14 +643,12 @@ const embedUrl = await createVerificationSession();
           <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
             <h3 className="font-semibold text-gray-900 mb-3">3. Set up your webhook handler</h3>
             
-            <div className="mb-4">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-6 h-6 bg-green-100 rounded flex items-center justify-center">
-                  <span className="text-green-700 font-bold text-xs">JS</span>
-                </div>
-                <span className="text-sm font-medium text-gray-700">Node.js / Express</span>
-              </div>
-              <CodeBlock code={`// Express webhook handler
+            <TabbedCodeBlock tabs={[
+              {
+                label: 'Node.js',
+                icon: 'JS',
+                iconBg: 'bg-green-100 text-green-700',
+                code: `// Express webhook handler
 app.post('/api/identity-webhook', express.json(), (req, res) => {
   const { event, sessionId, status, data } = req.body;
   
@@ -371,17 +680,13 @@ app.post('/api/identity-webhook', express.json(), (req, res) => {
   
   // Always respond with 200 to acknowledge receipt
   res.status(200).json({ received: true });
-});`} />
-            </div>
-
-            <div className="mb-4">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-6 h-6 bg-blue-100 rounded flex items-center justify-center">
-                  <span className="text-blue-700 font-bold text-xs">PHP</span>
-                </div>
-                <span className="text-sm font-medium text-gray-700">PHP / Laravel</span>
-              </div>
-              <CodeBlock code={`// Laravel webhook handler
+});`
+              },
+              {
+                label: 'PHP',
+                icon: 'PHP',
+                iconBg: 'bg-blue-100 text-blue-700',
+                code: `// Laravel webhook handler
 Route::post('/api/identity-webhook', function (Request $request) {
     $payload = $request->all();
     $event = $payload['event'];
@@ -406,17 +711,13 @@ Route::post('/api/identity-webhook', function (Request $request) {
     }
     
     return response()->json(['received' => true]);
-});`} />
-            </div>
-
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-6 h-6 bg-yellow-100 rounded flex items-center justify-center">
-                  <span className="text-yellow-700 font-bold text-xs">PY</span>
-                </div>
-                <span className="text-sm font-medium text-gray-700">Python / Flask</span>
-              </div>
-              <CodeBlock code={`# Flask webhook handler
+});`
+              },
+              {
+                label: 'Python',
+                icon: 'PY',
+                iconBg: 'bg-yellow-100 text-yellow-700',
+                code: `# Flask webhook handler
 @app.route('/api/identity-webhook', methods=['POST'])
 def identity_webhook():
     payload = request.get_json()
@@ -437,8 +738,9 @@ def identity_webhook():
     elif event == 'verification.failed':
         app.logger.warning(f'Verification failed: {session_id}')
     
-    return jsonify({'received': True}), 200`} />
-            </div>
+    return jsonify({'received': True}), 200`
+              }
+            ]} />
           </div>
 
           {/* Webhook Events */}

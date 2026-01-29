@@ -13,6 +13,8 @@ export default function Header() {
     { id: 'sessions', label: 'Create Sessions' },
     { id: 'id-types', label: 'Supported ID Types' },
     { id: 'embed', label: 'Embed Integration' },
+    { id: 'iframe-events', label: 'Iframe Events' },
+    { id: 'webhooks', label: 'Webhooks' },
     { id: 'status', label: 'Session Status' },
   ];
 

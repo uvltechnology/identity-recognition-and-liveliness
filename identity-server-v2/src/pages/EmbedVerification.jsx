@@ -41,13 +41,15 @@ export default function EmbedVerification({ initialState = {} }) {
       level: 'error',
     });
 
-    // Notify parent if embedded
+    // Notify parent if embedded - use standardized action name
     if (typeof window !== 'undefined' && window.parent !== window) {
       const payload = {
         identityOCR: {
-          action: 'close',
+          action: 'verification_cancelled',
+          status: 'cancelled',
           reason: 'consent_declined',
           session: sessionId,
+          verificationType: session?.payload?.verificationType || 'combined',
         },
       };
       try {
@@ -79,14 +81,16 @@ export default function EmbedVerification({ initialState = {} }) {
     // Auto-clear after 6 seconds
     setTimeout(() => setProblem(null), 6000);
 
-    // Notify parent if embedded
+    // Notify parent if embedded - use standardized action name for errors
     if (typeof window !== 'undefined' && window.parent !== window) {
       const payload = {
         identityOCR: {
-          action: 'problem',
+          action: level === 'error' ? 'verification_failed' : 'verification_problem',
+          status: level === 'error' ? 'failed' : 'warning',
           message,
           level,
           session: sessionId,
+          verificationType: session?.payload?.verificationType || 'combined',
         },
       };
       try {

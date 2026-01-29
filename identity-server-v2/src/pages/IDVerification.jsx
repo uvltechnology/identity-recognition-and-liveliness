@@ -118,6 +118,60 @@ export default function IDVerification() {
     }
   }, [expectedOrigin]);
 
+  // Notify parent about failure
+  const notifyParentFailed = useCallback(async (reason, details = {}) => {
+    notifyParent({
+      identityOCR: {
+        action: 'verification_failed',
+        status: 'failed',
+        reason: reason,
+        session: sessionId,
+        details: details,
+      },
+    });
+
+    try {
+      await fetch(`/api/verify/session/${sessionId}/result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'failed',
+          reason: reason,
+          result: details,
+          finishedAt: new Date().toISOString(),
+        }),
+      });
+    } catch (e) {
+      console.warn('[identity] session fail update failed', e);
+    }
+  }, [notifyParent, sessionId]);
+
+  // Notify parent about cancellation
+  const notifyParentCancelled = useCallback(async (reason) => {
+    notifyParent({
+      identityOCR: {
+        action: 'verification_cancelled',
+        status: 'cancelled',
+        reason: reason,
+        session: sessionId,
+      },
+    });
+
+    try {
+      await fetch(`/api/verify/session/${sessionId}/result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'cancelled',
+          reason: reason,
+          finishedAt: new Date().toISOString(),
+        }),
+      });
+    } catch (e) {
+      console.warn('[identity] session cancel update failed', e);
+    }
+  }, [notifyParent, sessionId]);
+
   const handleConsentAccept = () => {
     setConsentGiven(true);
     setFeedback('Select ID type to continue');
@@ -126,29 +180,7 @@ export default function IDVerification() {
   const handleConsentDecline = async () => {
     setConsentGiven(false);
     setError('You declined the camera consent. The verification has been cancelled.');
-
-    // Notify parent
-    notifyParent({
-      identityOCR: {
-        action: 'close',
-        reason: 'consent_declined',
-        session: sessionId,
-      },
-    });
-
-    // Cancel session on server
-    try {
-      await fetch(`/api/verify/session/${sessionId}/result`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: 'cancelled',
-          finishedAt: new Date().toISOString(),
-        }),
-      });
-    } catch (e) {
-      console.warn('[identity] session cancel failed', e);
-    }
+    await notifyParentCancelled('consent_declined');
   };
 
   const startCamera = async () => {
@@ -376,6 +408,11 @@ export default function IDVerification() {
         setFeedback('ID type mismatch detected');
         setFeedbackType('error');
         setIsProcessing(false);
+        // Notify parent about ID type mismatch
+        notifyParentFailed('id_type_mismatch', { 
+          expected: selectedType, 
+          detected: data.fields?.idType || 'Unknown' 
+        });
         return;
       }
 
@@ -414,6 +451,8 @@ export default function IDVerification() {
         setFeedback('Required fields not detected');
         setFeedbackType('error');
         setIsProcessing(false);
+        // Notify parent about missing required fields
+        notifyParentFailed('missing_required_fields', { missingFields: missing });
         return;
       }
 
@@ -440,13 +479,16 @@ export default function IDVerification() {
 
       await saveSessionResult(result);
 
-      // Notify parent
+      // Notify parent about success
       notifyParent({
         identityOCR: {
-          action: 'id_verification_complete',
+          action: 'verification_success',
+          status: 'success',
           result: result,
           session: sessionId,
           data: result.fields,
+          verificationType: session?.payload?.verificationType || 'id',
+          nextStep: session?.payload?.nextStep || null,
         },
       });
 
@@ -455,6 +497,9 @@ export default function IDVerification() {
       setFeedback('Failed: ' + err.message);
       setFeedbackType('error');
       setIsProcessing(false);
+      
+      // Notify parent about error
+      notifyParentFailed('processing_error', { error: err.message });
     }
   };
 

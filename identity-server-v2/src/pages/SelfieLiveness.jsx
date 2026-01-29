@@ -175,19 +175,42 @@ export default function SelfieLiveness() {
     }
   }, [expectedOrigin]);
 
-  const handleConsentAccept = () => {
-    setConsentGiven(true);
-    setFaceFeedback('Press Start to begin');
-  };
-
-  const handleConsentDecline = async () => {
-    setConsentGiven(false);
-    setError('You declined the camera consent. The verification has been cancelled.');
-
+  // Notify parent about failure
+  const notifyParentFailed = useCallback(async (reason, details = {}) => {
     notifyParent({
       identityOCR: {
-        action: 'close',
-        reason: 'consent_declined',
+        action: 'verification_failed',
+        status: 'failed',
+        reason: reason,
+        session: sessionId,
+        details: details,
+      },
+    });
+
+    // Update session on server
+    try {
+      await fetch(`/api/verify/session/${sessionId}/result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'failed',
+          reason: reason,
+          result: details,
+          finishedAt: new Date().toISOString(),
+        }),
+      });
+    } catch (e) {
+      console.warn('[identity] session fail update failed', e);
+    }
+  }, [notifyParent, sessionId]);
+
+  // Notify parent about cancellation
+  const notifyParentCancelled = useCallback(async (reason) => {
+    notifyParent({
+      identityOCR: {
+        action: 'verification_cancelled',
+        status: 'cancelled',
+        reason: reason,
         session: sessionId,
       },
     });
@@ -198,12 +221,25 @@ export default function SelfieLiveness() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           status: 'cancelled',
+          reason: reason,
           finishedAt: new Date().toISOString(),
         }),
       });
     } catch (e) {
-      console.warn('[identity] session cancel failed', e);
+      console.warn('[identity] session cancel update failed', e);
     }
+  }, [notifyParent, sessionId]);
+
+  const handleConsentAccept = () => {
+    setConsentGiven(true);
+    setFaceFeedback('Press Start to begin');
+  };
+
+  const handleConsentDecline = async () => {
+    setConsentGiven(false);
+    setError('You declined the camera consent. The verification has been cancelled.');
+
+    await notifyParentCancelled('consent_declined');
   };
 
   const startFaceDetection = async () => {
@@ -944,6 +980,16 @@ export default function SelfieLiveness() {
           setFaceFeedbackType('error');
           centeredFrameCountRef.current = 0;
           setCapturedFace(imageDataUrl);
+
+          // Notify parent about face mismatch failure
+          notifyParentFailed('face_mismatch', {
+            confidence: similarity || (100 - (aiConfidence || 50)),
+            reason: mismatchReason,
+            faceApiDistance,
+            aiMatch,
+            aiConfidence
+          });
+
           return;
         }
       }
@@ -976,12 +1022,14 @@ export default function SelfieLiveness() {
 
       await saveSessionResult(result);
 
-      // Notify parent
+      // Notify parent about success
       notifyParent({
         identityOCR: {
-          action: 'selfie_liveness_complete',
+          action: 'verification_success',
+          status: 'success',
           result: result,
           session: sessionId,
+          verificationType: session?.payload?.verificationType || 'selfie',
         },
       });
 
@@ -990,6 +1038,9 @@ export default function SelfieLiveness() {
       setFaceFeedback('⚠️ Verification failed, try again');
       setFaceFeedbackType('error');
       centeredFrameCountRef.current = 0;
+      
+      // Notify parent about error
+      notifyParentFailed('capture_error', { error: err.message });
     }
   };
 
