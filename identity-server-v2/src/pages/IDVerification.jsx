@@ -487,6 +487,9 @@ export default function IDVerification() {
           result: result,
           session: sessionId,
           data: result.fields,
+          images: {
+            idImage: imageDataUrl,
+          },
           verificationType: session?.payload?.verificationType || 'id',
           nextStep: session?.payload?.nextStep || null,
         },

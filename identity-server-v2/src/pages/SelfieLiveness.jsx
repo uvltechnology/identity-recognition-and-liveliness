@@ -1029,6 +1029,9 @@ export default function SelfieLiveness() {
           status: 'success',
           result: result,
           session: sessionId,
+          images: {
+            selfieImage: imageDataUrl,
+          },
           verificationType: session?.payload?.verificationType || 'selfie',
         },
       });

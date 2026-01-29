@@ -5,6 +5,7 @@ import IDVerificationTest from './pages/IDVerificationTest';
 import SelfieLivenessTest from './pages/SelfieLivenessTest';
 import IDVerification from './pages/IDVerification';
 import SelfieLiveness from './pages/SelfieLiveness';
+import CombinedVerification from './pages/CombinedVerification';
 import Documentation from './pages/Documentation';
 import ApiDemo from './pages/ApiDemo';
 import VerificationSuccess from './pages/demo/Success';
@@ -22,6 +23,7 @@ export default function App({ initialState = {} }) {
       {/* Session-based verification routes */}
       <Route path="/session/idverification/:id" element={<IDVerification />} />
       <Route path="/session/selfieliveness/:id" element={<SelfieLiveness />} />
+      <Route path="/session/combined/:id" element={<CombinedVerification />} />
       {/* Demo result pages */}
       <Route path="/demo/success" element={<VerificationSuccess />} />
       <Route path="/demo/failed" element={<VerificationFailed />} />

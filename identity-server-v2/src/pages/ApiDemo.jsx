@@ -152,7 +152,7 @@ const SessionCard = ({ session, type }) => {
     } else if (type === 'selfie') {
       return `/session/selfieliveness/${session.sessionId}`;
     } else if (type === 'combined') {
-      return `/session/idverification/${session.sessionId}`;
+      return `/session/combined/${session.sessionId}`;
     }
     return session.sessionUrl || session.embedUrl;
   };

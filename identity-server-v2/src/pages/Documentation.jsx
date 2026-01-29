@@ -466,6 +466,7 @@ const embedUrl = await createVerificationSession();
                 { name: 'success', type: 'boolean', required: true, description: 'Whether the request was successful' },
                 { name: 'sessionId', type: 'string', required: true, description: 'ID verification session identifier' },
                 { name: 'selfieSessionId', type: 'string', required: true, description: 'Linked selfie session identifier' },
+                { name: 'sessionUrl', type: 'string', required: true, description: 'URL for combined verification page' },
                 { name: 'embedUrl', type: 'string', required: true, description: 'URL to embed in iframe' },
               ],
               requestBody: `{
@@ -477,6 +478,7 @@ const embedUrl = await createVerificationSession();
   "success": true,
   "sessionId": "sess_combined_abc123",
   "selfieSessionId": "sess_selfie_def456",
+  "sessionUrl": "https://identity.logica.dev/session/combined/sess_combined_abc123",
   "embedUrl": "https://identity.logica.dev/embed/session/sess_combined_abc123"
 }`
             },
@@ -644,7 +646,7 @@ const embedUrl = await createVerificationSession();
                   <tr>
                     <td className="px-3 py-2"><code className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs">verification_success</code></td>
                     <td className="px-3 py-2"><code className="text-xs">success</code></td>
-                    <td className="px-3 py-2 text-gray-600">Verification completed successfully</td>
+                    <td className="px-3 py-2 text-gray-600">Verification completed successfully (final event)</td>
                   </tr>
                   <tr>
                     <td className="px-3 py-2"><code className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs">verification_failed</code></td>
@@ -669,18 +671,59 @@ const embedUrl = await createVerificationSession();
           {/* Payload Structure */}
           <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
             <h3 className="font-semibold text-gray-900 mb-3">Message Payload Structure</h3>
-            <CodeBlock code={`// Success payload
+            <CodeBlock code={`// Success payload (ID Verification)
 {
   identityOCR: {
     action: 'verification_success',
     status: 'success',
     session: 'sess_abc123',
-    verificationType: 'id' | 'selfie' | 'combined',
+    verificationType: 'id',
     result: {
       fields: { firstName, lastName, idNumber, ... },
-      faceMatch: { match: true, similarity: 0.85 }  // selfie only
+      capturedImageBase64: 'data:image/jpeg;base64,...'
     },
-    data: { ... }  // Extracted ID fields
+    data: { ... },  // Extracted ID fields
+    images: {
+      idImage: 'data:image/jpeg;base64,...'  // Captured ID image
+    }
+  }
+}
+
+// Success payload (Selfie Liveness)
+{
+  identityOCR: {
+    action: 'verification_success',
+    status: 'success',
+    session: 'sess_abc123',
+    verificationType: 'selfie',
+    result: {
+      capturedImageBase64: 'data:image/jpeg;base64,...',
+      livenessScore: 100,
+      faceMatched: true
+    },
+    images: {
+      selfieImage: 'data:image/jpeg;base64,...'  // Captured selfie
+    }
+  }
+}
+
+// Success payload (Combined Verification)
+{
+  identityOCR: {
+    action: 'verification_success',
+    status: 'success',
+    session: 'sess_abc123',
+    verificationType: 'combined',
+    result: {
+      idData: { firstName, lastName, ... },
+      faceMatched: true,
+      faceSimilarity: 85,
+      livenessScore: 100
+    },
+    images: {
+      idImage: 'data:image/jpeg;base64,...',     // Captured ID
+      selfieImage: 'data:image/jpeg;base64,...'  // Captured selfie
+    }
   }
 }
 
@@ -762,7 +805,7 @@ window.addEventListener('message', (event) => {
   const { identityOCR } = event.data;
   if (!identityOCR) return;
   
-  const { action, status, session, reason, result, details, verificationType } = identityOCR;
+  const { action, status, session, reason, result, details, verificationType, images } = identityOCR;
   
   switch (action) {
     case 'verification_success':
@@ -770,6 +813,20 @@ window.addEventListener('message', (event) => {
       console.log('Session:', session);
       console.log('Type:', verificationType);
       console.log('Data:', result);
+      
+      // Access captured images based on verification type
+      if (images) {
+        if (images.idImage) {
+          console.log('ID Image captured');
+          // Save or display the ID image
+          // images.idImage is a base64 data URL
+        }
+        if (images.selfieImage) {
+          console.log('Selfie Image captured');
+          // Save or display the selfie image
+          // images.selfieImage is a base64 data URL
+        }
+      }
       
       // Close the iframe or redirect
       document.getElementById('verification-iframe').remove();

@@ -715,7 +715,7 @@ async function createServer() {
         });
       }
 
-      const sessionUrl = `${origin}/session/idverification/${idSessionId}`;
+      const sessionUrl = `${origin}/session/combined/${idSessionId}`;
       const selfieSessionUrl = `${origin}/session/selfieliveness/${selfieSessionId}`;
       const embedUrl = `${origin}/embed/session/${idSessionId}`;
       const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
