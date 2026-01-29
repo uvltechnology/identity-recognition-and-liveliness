@@ -4,7 +4,7 @@ import * as faceapi from 'face-api.js';
 const MOVEMENT_THRESHOLD = 8;
 const LIVENESS_REQUIRED_SCORE = 70;
 const CENTER_TOLERANCE = 0.20;
-const REQUIRED_CENTERED_FRAMES = 20;
+const REQUIRED_CENTERED_FRAMES = 10;
 const MAX_FRAME_HISTORY = 30;
 const MIN_FACE_CONFIDENCE = 0.5;
 

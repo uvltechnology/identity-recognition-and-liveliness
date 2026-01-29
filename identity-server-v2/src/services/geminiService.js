@@ -573,37 +573,36 @@ class GeminiService {
     }
 
     const system = [
-      'You are an ID document image quality analyzer. Analyze the provided image to check if it is suitable for ID verification processing.',
+      'You are a STRICT ID image quality checker for identity verification.',
       '',
       'Return JSON: {',
       '  "isAcceptable": boolean,',
       '  "confidence": number,',
       '  "issues": [string],',
-      '  "details": {',
-      '    "isCentered": boolean,',
-      '    "hasObstacles": boolean,',
-      '    "isBlurry": boolean,',
-      '    "hasLightReflection": boolean,',
-      '    "isIdVisible": boolean,',
-      '    "isFullyInFrame": boolean',
-      '  },',
       '  "suggestion": string',
       '}',
       '',
-      'Check for these quality issues:',
-      '1. ID Card Centering - Is the ID card reasonably centered in the frame?',
-      '2. Obstacles/Blocking - Are there fingers, objects, or anything blocking important parts of the ID?',
-      '3. Blur/Focus - Is the image sharp and text readable, or is it blurry/out of focus?',
-      '4. Light Reflection/Glare - Is there strong light reflection, glare, or hotspots obscuring the ID?',
-      '5. ID Visibility - Is an actual ID card/document visible in the image?',
-      '6. Framing - Is the entire ID visible within the frame (not cropped)?',
+      'REJECT (isAcceptable: false) if ANY of these issues exist:',
+      '1. NO ID VISIBLE - Cannot see an ID card in the image',
+      '2. BLURRY/UNCLEAR - Text on the ID is not sharp and readable',
+      '3. FINGER BLOCKING - Any finger covers ANY part of the ID text or photo',
+      '4. OBJECT BLOCKING - Any object (hand, paper, etc.) covers part of the ID',
+      '5. GLARE/REFLECTION - Light reflection makes any text unreadable',
+      '6. TOO DARK/BRIGHT - Cannot clearly see the ID details',
+      '7. ID CUT OFF - Part of the ID card is outside the image frame',
+      '8. TILTED/ANGLED - ID is at an angle making text hard to read',
       '',
-      'isAcceptable should be true only if the ID is visible, reasonably centered, not significantly blocked, not too blurry, and has no major glare issues.',
-      'confidence: 0-100 (how confident you are about the quality assessment)',
-      'issues: array of specific problems found (empty if acceptable)',
-      'suggestion: brief advice for the user if issues found',
+      'ACCEPT (isAcceptable: true) ONLY if:',
+      '- The ENTIRE ID card is fully visible',
+      '- ALL text on the ID is clear and readable',
+      '- NO fingers or objects blocking ANY part of the ID',
+      '- NO glare or reflection on the ID',
+      '- Image is sharp and in focus',
       '',
-      'Return ONLY JSON, no prose.'
+      'Be STRICT. If you see ANY finger or object touching/covering the ID, reject it.',
+      'The ID must be completely clear and unobstructed for identity verification.',
+      '',
+      'Return ONLY valid JSON.'
     ].join('\n');
 
     try {
@@ -632,7 +631,7 @@ class GeminiService {
           role: 'user',
           parts: [
             { inlineData: { mimeType, data: base64Data } },
-            { text: 'Analyze this ID document image for quality issues. Check centering, obstacles, blur, and light reflection.' }
+            { text: 'Check this ID image strictly. Is the ENTIRE ID clearly visible with NO fingers, hands, or objects blocking ANY part? Is ALL text sharp and readable? Only accept if the ID is 100% clear and unobstructed.' }
           ]
         }],
         generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
@@ -660,6 +659,135 @@ class GeminiService {
     } catch (err) {
       console.error('[GeminiService] checkIdImageQuality error:', err.message);
       return { error: 'ID image quality check failed', details: err.message };
+    }
+  }
+
+  /**
+   * Compare two face images to verify they are the same person
+   * Used in combined verification to match ID photo with selfie
+   */
+  async compareFaces(idImageBase64, selfieImageBase64) {
+    if (!this.enabled) {
+      return { error: 'Gemini API key not configured', disabled: true };
+    }
+
+    const system = [
+      'You are a STRICT facial recognition and identity verification system.',
+      'You will receive two images:',
+      '1. An ID document photo (contains a face photo on the document)',
+      '2. A selfie photo of a person claiming to be the ID holder',
+      '',
+      'Your task is to determine if the person in the selfie is the SAME INDIVIDUAL as the face shown on the ID document.',
+      'This is a security-critical verification - err on the side of caution.',
+      '',
+      'Return JSON only:',
+      '{',
+      '  "isMatch": boolean,',
+      '  "confidence": number (0-100),',
+      '  "reason": string,',
+      '  "details": {',
+      '    "idFaceDetected": boolean,',
+      '    "selfieFaceDetected": boolean,',
+      '    "facialFeaturesSimilarity": number (0-100),',
+      '    "matchingFeatures": string[],',
+      '    "differingFeatures": string[]',
+      '  }',
+      '}',
+      '',
+      'STRICT MATCHING RULES:',
+      '- isMatch should be TRUE only if you are HIGHLY confident (>80%) the faces belong to the SAME person',
+      '- isMatch should be FALSE if there is ANY significant doubt about identity',
+      '- Different people should ALWAYS result in isMatch=false with high confidence',
+      '',
+      'Key features to compare CAREFULLY:',
+      '- Face shape and bone structure (most reliable)',
+      '- Eye shape, spacing, and position',
+      '- Nose shape and size',
+      '- Mouth and lip shape',
+      '- Eyebrow shape and position',
+      '- Ear shape (if visible)',
+      '- Facial proportions and ratios',
+      '',
+      'DO NOT be fooled by:',
+      '- Similar hairstyles or hair color',
+      '- Similar skin tone',
+      '- Similar accessories (glasses)',
+      '- Similar expressions',
+      '- Similar age range',
+      '',
+      'If the faces belong to DIFFERENT people, set isMatch=false and confidence should reflect how certain you are they are different (higher = more certain of mismatch).',
+      'If ID document face is not clearly visible, set idFaceDetected to false and isMatch to false.',
+      '',
+      'Return ONLY JSON, no prose.'
+    ].join('\n');
+
+    try {
+      // Process ID image
+      let idMimeType = 'image/jpeg';
+      let idBase64Data = idImageBase64;
+      
+      if (idImageBase64.startsWith('data:')) {
+        const match = idImageBase64.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          idMimeType = match[1];
+          idBase64Data = match[2];
+        }
+      }
+
+      // Process selfie image
+      let selfieMimeType = 'image/jpeg';
+      let selfieBase64Data = selfieImageBase64;
+      
+      if (selfieImageBase64.startsWith('data:')) {
+        const match = selfieImageBase64.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          selfieMimeType = match[1];
+          selfieBase64Data = match[2];
+        }
+      }
+
+      if (this.debug) {
+        console.log(`[GeminiService][Face Comparison] Using model: ${this.modelId}`);
+      }
+
+      const model = this.client.getGenerativeModel({
+        model: this.modelId,
+        systemInstruction: system
+      });
+
+      const result = await model.generateContent({
+        contents: [{
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType: idMimeType, data: idBase64Data } },
+            { inlineData: { mimeType: selfieMimeType, data: selfieBase64Data } },
+            { text: 'Compare these two images. The first image is an ID document with a face photo. The second image is a selfie. Determine if they are the same person.' }
+          ]
+        }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
+      });
+
+      const text = result?.response?.text?.() || '';
+      const trimmed = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+      
+      let parsed;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (e) {
+        const match = trimmed.match(/\{[\s\S]*\}/);
+        if (match) parsed = JSON.parse(match[0]);
+        else throw e;
+      }
+
+      return {
+        isMatch: parsed.isMatch === true,
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0,
+        reason: parsed.reason || '',
+        details: parsed.details || {}
+      };
+    } catch (err) {
+      console.error('[GeminiService] compareFaces error:', err.message);
+      return { error: 'Face comparison failed', details: err.message };
     }
   }
 }

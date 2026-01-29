@@ -16,7 +16,7 @@ export default function Header() {
     { id: 'status', label: 'Session Status' },
   ];
 
-  const navLinks = [
+  const navLinks = [          
     { to: '/', label: 'Home' },
     { to: '/api-demo', label: 'API Demo' },
   ];

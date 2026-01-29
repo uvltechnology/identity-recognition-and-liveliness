@@ -213,7 +213,7 @@ export default function IDVerification() {
 
     setCapturedImage(imageDataUrl);
 
-    // AI Image Quality Check
+    // AI Image Quality Check - MUST pass before extraction
     setFeedback('🤖 AI checking image quality...');
     setFeedbackType('info');
 
@@ -222,26 +222,64 @@ export default function IDVerification() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: imageDataUrl })
-      }, 15000);
+      }, 20000);
 
       const qualityData = await qualityRes.json();
+      
+      // Log full AI response for debugging
+      console.log('[AI Quality Check] Full response:', JSON.stringify(qualityData, null, 2));
 
-      if (qualityData.success && qualityData.result) {
-        const { isAcceptable, issues, suggestion, details } = qualityData.result;
+      if (!qualityData.success) {
+        // API returned error - don't proceed
+        console.log('[AI Quality Check] API error:', qualityData.error);
+        setImageQualityIssues(['Quality check failed: ' + (qualityData.error || 'Unknown error')]);
+        setImageQualityFailed(true);
+        setFeedback('Unable to verify image quality. Please try again.');
+        setFeedbackType('error');
+        setIsProcessing(false);
+        return;
+      }
 
-        if (!isAcceptable && issues && issues.length > 0) {
-          setImageQualityIssues(issues);
+      if (qualityData.result) {
+        const { isAcceptable, issues, suggestion, details, confidence } = qualityData.result;
+        
+        // Log AI decision details
+        console.log('[AI Quality Check] Decision:', { isAcceptable, confidence, issues, suggestion, details });
+
+        // If not acceptable, show issues and stop
+        if (!isAcceptable) {
+          // Include AI suggestion in issues if available
+          const issueList = [];
+          if (issues && issues.length > 0) {
+            issueList.push(...issues);
+          }
+          if (suggestion) {
+            issueList.push('AI says: ' + suggestion);
+          }
+          if (issueList.length === 0) {
+            issueList.push('Image quality not acceptable');
+          }
+          
+          setImageQualityIssues(issueList);
           setImageQualityFailed(true);
-          setFeedback('Image quality issues detected');
+          setFeedback(suggestion || 'Please retake the photo');
           setFeedbackType('error');
           setIsProcessing(false);
           return;
         }
       }
     } catch (qualityErr) {
-      console.warn('AI quality check failed, proceeding:', qualityErr);
+      // AI quality check failed - do NOT proceed, require retry
+      console.error('AI quality check error:', qualityErr);
+      setImageQualityIssues(['quality_check_error: ' + qualityErr.message]);
+      setImageQualityFailed(true);
+      setFeedback('Quality check failed. Please try again.');
+      setFeedbackType('error');
+      setIsProcessing(false);
+      return;
     }
 
+    // Only proceed to extraction if quality check passed
     stopCamera();
     await processImage(imageDataUrl);
   };
@@ -625,14 +663,22 @@ export default function IDVerification() {
   // Image Quality Failed View
   if (imageQualityFailed && capturedImage) {
     const issueLabels = {
+      'no_id_detected': 'No ID card detected in image',
+      'partial_visible': 'ID is partially cut off or cropped',
       'not_centered': 'ID is not centered in frame',
-      'has_obstacles': 'Obstacles blocking the ID',
+      'has_obstacles': 'Fingers or objects blocking the ID',
+      'text_partially_blocked': 'Some text or letters are covered',
+      'name_partially_visible': 'Name field is partially blocked',
+      'id_number_partially_visible': 'ID number is partially blocked',
       'is_blurry': 'Image is blurry or out of focus',
       'has_glare': 'Light reflection or glare detected',
       'too_dark': 'Image is too dark',
       'too_bright': 'Image is overexposed',
-      'partial_visible': 'ID is partially cut off',
-      'tilted': 'ID is tilted or at an angle',
+      'text_not_readable': 'Text on ID is not readable',
+      'face_not_visible': 'Face photo on ID is not clear',
+      'quality_check_error': 'Quality check failed - please try again',
+      'Quality check failed': 'Unable to verify image quality',
+      'Image quality not acceptable': 'Image quality not acceptable',
     };
 
     return (
@@ -645,32 +691,49 @@ export default function IDVerification() {
 
         <div className="flex-1 flex flex-col items-center justify-center p-6">
           <div className="w-full max-w-md">
-            <div className="text-center mb-6">
-              <div className="w-20 h-20 mx-auto bg-orange-500 rounded-full flex items-center justify-center mb-4 shadow-lg">
-                <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+            <div className="text-center mb-4">
+              <div className="w-16 h-16 mx-auto bg-orange-500 rounded-full flex items-center justify-center mb-3 shadow-lg">
+                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
               </div>
-              <h1 className="text-2xl font-bold text-gray-900">Image Quality Issue</h1>
-              <p className="text-gray-600 mt-2">Please retake the photo with better quality</p>
+              <h1 className="text-xl font-bold text-gray-900">Image Quality Issue</h1>
+              <p className="text-gray-600 mt-1 text-sm">The captured image has problems</p>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-xl p-4 mb-6">
-              <div className="text-sm font-semibold text-gray-700 mb-3">Issues Detected:</div>
+            {/* Show captured image with issues highlighted */}
+            <div className="bg-white rounded-2xl shadow-xl p-3 mb-4">
+              <div className="text-xs font-medium text-gray-500 mb-2">Captured Image:</div>
+              <div className="relative rounded-lg overflow-hidden border-2 border-orange-300">
+                <img 
+                  src={capturedImage} 
+                  alt="Captured ID" 
+                  className="w-full h-auto"
+                />
+                <div className="absolute inset-0 border-4 border-orange-500/50 rounded-lg pointer-events-none"></div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-xl p-4 mb-4">
+              <div className="text-sm font-semibold text-red-600 mb-3 flex items-center gap-2">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Issues Detected:
+              </div>
               <div className="space-y-2">
                 {imageQualityIssues.map((issue, index) => (
-                  <div key={index} className="flex items-center gap-2 text-orange-600">
-                    <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  <div key={index} className="flex items-start gap-2 text-orange-700 bg-orange-50 p-2 rounded-lg">
+                    <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
-                    <span className="text-sm">{issueLabels[issue] || issue}</span>
+                    <span className="text-sm font-medium">{issueLabels[issue] || issue}</span>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
               <div className="flex gap-3">
                 <div className="text-blue-500 flex-shrink-0">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -680,10 +743,11 @@ export default function IDVerification() {
                 <div>
                   <div className="font-semibold text-blue-800 text-sm">Tips for better capture</div>
                   <div className="text-blue-700 text-xs mt-1">
-                    • Center the ID within the camera frame<br/>
-                    • Use good, even lighting<br/>
-                    • Avoid glare and reflections<br/>
-                    • Keep the camera steady and focused
+                    • Make sure the entire ID is visible - don't crop any edges<br/>
+                    • Avoid light reflection or glare on the ID surface<br/>
+                    • Keep fingers and objects away from the ID<br/>
+                    • Hold the camera steady for a sharp, focused image<br/>
+                    • Use good, even lighting without shadows
                   </div>
                 </div>
               </div>

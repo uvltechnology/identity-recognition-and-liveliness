@@ -316,6 +316,50 @@ async function createServer() {
     }
   });
 
+  // Face Comparison endpoint - Compare ID photo with selfie
+  app.post('/api/ai/face/compare', async (req, res) => {
+    try {
+      const { idImage, selfieImage } = req.body || {};
+      
+      if (!idImage || !selfieImage) {
+        return res.status(400).json({ success: false, error: 'idImage and selfieImage are required' });
+      }
+
+      if (!geminiService.enabled) {
+        // If AI not available, skip comparison and allow
+        return res.json({
+          success: true,
+          result: {
+            isMatch: true,
+            confidence: 0,
+            reason: 'AI face comparison unavailable',
+            details: { aiUnavailable: true }
+          }
+        });
+      }
+
+      const result = await geminiService.compareFaces(idImage, selfieImage);
+      
+      if (result.error) {
+        // On error, skip comparison
+        return res.json({
+          success: true,
+          result: {
+            isMatch: true,
+            confidence: 0,
+            reason: 'Face comparison error, proceeding',
+            details: { error: result.error }
+          }
+        });
+      }
+
+      return res.json({ success: true, result });
+    } catch (err) {
+      console.error('Face comparison error:', err);
+      return res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  });
+
   // OCR endpoints
   app.post('/api/ocr/text', upload.single('image'), async (req, res) => {
     try {

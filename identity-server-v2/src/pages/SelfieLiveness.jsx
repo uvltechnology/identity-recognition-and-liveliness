@@ -5,7 +5,7 @@ import * as faceapi from 'face-api.js';
 const MOVEMENT_THRESHOLD = 8;
 const LIVENESS_REQUIRED_SCORE = 70;
 const CENTER_TOLERANCE = 0.20;
-const REQUIRED_CENTERED_FRAMES = 20;
+const REQUIRED_CENTERED_FRAMES = 10;
 const MAX_FRAME_HISTORY = 30;
 const MIN_FACE_CONFIDENCE = 0.5;
 
@@ -57,6 +57,9 @@ export default function SelfieLiveness() {
   const [currentExpression, setCurrentExpression] = useState('');
   const [faceLandmarks, setFaceLandmarks] = useState(null);
   const [faceBox, setFaceBox] = useState(null);
+  const [linkedIdImage, setLinkedIdImage] = useState(null);
+  const [faceMismatch, setFaceMismatch] = useState(false);
+  const [faceMismatchDetails, setFaceMismatchDetails] = useState(null);
   const overlayCanvasRef = useRef(null);
 
   // Expected origin for postMessage
@@ -71,7 +74,7 @@ export default function SelfieLiveness() {
 
     fetch(`/api/verify/session/${sessionId}`)
       .then(res => res.json())
-      .then(data => {
+      .then(async (data) => {
         if (data.success && data.session) {
           const sessionStatus = (data.session.status || '').toLowerCase();
           // Check if session is already in a terminal state
@@ -101,6 +104,20 @@ export default function SelfieLiveness() {
           }
           setSession(data.session);
           setFaceFeedback('Press Start to begin');
+
+          // If this is a combined flow, fetch the linked ID session to get the ID image
+          if (data.session.payload?.verificationType === 'combined-selfie' && data.session.payload?.linkedIdSession) {
+            try {
+              const idSessionRes = await fetch(`/api/verify/session/${data.session.payload.linkedIdSession}`);
+              const idSessionData = await idSessionRes.json();
+              if (idSessionData.success && idSessionData.session?.result?.capturedImageBase64) {
+                setLinkedIdImage(idSessionData.session.result.capturedImageBase64);
+                console.log('[SelfieLiveness] Linked ID image loaded for face comparison');
+              }
+            } catch (err) {
+              console.warn('[SelfieLiveness] Failed to load linked ID session:', err);
+            }
+          }
         } else {
           setError('Session not found or expired');
         }
@@ -124,6 +141,7 @@ export default function SelfieLiveness() {
           faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
           faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
           faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
         ]);
         modelsLoadedRef.current = true;
         setModelsLoaded(true);
@@ -708,6 +726,139 @@ export default function SelfieLiveness() {
         console.warn('AI liveness check failed, proceeding with local checks:', aiErr);
       }
 
+      // Face comparison for combined verification flow
+      if (linkedIdImage) {
+        setFaceFeedback('🔍 Comparing face with ID photo...');
+        setFaceFeedbackType('info');
+
+        let faceApiMatch = null;
+        let faceApiDistance = null;
+
+        // Face-api.js descriptor comparison
+        try {
+          // Load ID image and extract face descriptor
+          const idImg = await faceapi.fetchImage(linkedIdImage);
+          const idDetection = await faceapi
+            .detectSingleFace(idImg, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.3 }))
+            .withFaceLandmarks()
+            .withFaceDescriptor();
+
+          // Get selfie face descriptor from current capture
+          const selfieImg = await faceapi.fetchImage(imageDataUrl);
+          const selfieDetection = await faceapi
+            .detectSingleFace(selfieImg, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.3 }))
+            .withFaceLandmarks()
+            .withFaceDescriptor();
+
+          if (idDetection && selfieDetection) {
+            // Calculate euclidean distance between face descriptors
+            // Lower distance = more similar faces
+            // Stricter threshold: 0.5 for match (was 0.6)
+            const distance = faceapi.euclideanDistance(idDetection.descriptor, selfieDetection.descriptor);
+            faceApiDistance = distance;
+            faceApiMatch = distance < 0.5; // Stricter threshold for face recognition
+
+            console.log('[FaceComparison] Face-api.js distance:', distance, 'Match:', faceApiMatch);
+          } else {
+            console.warn('[FaceComparison] Could not detect face in one or both images');
+            // If we can't detect face in ID, this is suspicious
+            if (!idDetection) {
+              console.warn('[FaceComparison] No face detected in ID image');
+            }
+            if (!selfieDetection) {
+              console.warn('[FaceComparison] No face detected in selfie');
+            }
+          }
+        } catch (faceApiErr) {
+          console.warn('[FaceComparison] Face-api.js comparison failed:', faceApiErr);
+        }
+
+        // AI comparison
+        let aiMatch = null;
+        let aiConfidence = null;
+        let aiReason = null;
+
+        try {
+          const compareResponse = await fetch('/api/ai/face/compare', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              idImage: linkedIdImage,
+              selfieImage: imageDataUrl,
+            }),
+          });
+
+          const compareResult = await compareResponse.json();
+
+          if (compareResult.success && compareResult.result) {
+            aiMatch = compareResult.result.isMatch;
+            aiConfidence = compareResult.result.confidence;
+            aiReason = compareResult.result.reason;
+            console.log('[FaceComparison] AI result:', aiMatch, 'Confidence:', aiConfidence, 'Reason:', aiReason);
+          }
+        } catch (aiCompareErr) {
+          console.warn('[FaceComparison] AI comparison failed:', aiCompareErr);
+        }
+
+        console.log('[FaceComparison] Final Results - FaceAPI Match:', faceApiMatch, 'Distance:', faceApiDistance, 'AI Match:', aiMatch, 'AI Confidence:', aiConfidence);
+
+        // STRICT Combined decision logic:
+        // 1. If face-api.js detects mismatch (distance >= 0.5), FAIL regardless of AI
+        // 2. If AI says no match with confidence >= 50, FAIL regardless of face-api.js
+        // 3. If face-api.js couldn't detect faces but AI says no match, FAIL
+        // 4. Only pass if face-api.js says match (distance < 0.5) OR face-api.js unavailable AND AI says match
+
+        let finalMismatch = false;
+        let mismatchReason = '';
+
+        // Check face-api.js result first (most reliable for different people)
+        if (faceApiDistance !== null) {
+          if (faceApiDistance >= 0.5) {
+            // Face-api.js says different person - FAIL
+            finalMismatch = true;
+            const similarity = Math.round((1 - faceApiDistance) * 100);
+            mismatchReason = `Face mismatch: ${similarity}% similarity (requires >50%)`;
+          } else if (faceApiDistance >= 0.4 && aiMatch === false) {
+            // Borderline case - face-api.js uncertain AND AI says no match - FAIL
+            finalMismatch = true;
+            const similarity = Math.round((1 - faceApiDistance) * 100);
+            mismatchReason = `Faces don't match: ${similarity}% similarity, AI confirms mismatch`;
+          }
+        }
+
+        // Check AI result (catches cases face-api.js might miss)
+        if (!finalMismatch && aiMatch === false && aiConfidence >= 50) {
+          // AI is confident it's not the same person - FAIL
+          finalMismatch = true;
+          mismatchReason = aiReason || `AI detected different person (${aiConfidence}% confidence)`;
+        }
+
+        // If face-api.js couldn't detect faces, rely more on AI
+        if (!finalMismatch && faceApiDistance === null && aiMatch === false && aiConfidence >= 40) {
+          finalMismatch = true;
+          mismatchReason = aiReason || 'Could not verify face match - AI detected mismatch';
+        }
+
+        if (finalMismatch) {
+          setFaceMismatch(true);
+          setFaceMismatchDetails({
+            confidence: faceApiDistance !== null ? Math.round((1 - faceApiDistance) * 100) : (100 - (aiConfidence || 50)),
+            reason: mismatchReason,
+            details: {
+              faceApiDistance,
+              faceApiMatch,
+              aiMatch,
+              aiConfidence
+            },
+          });
+          setFaceFeedback(`❌ ${mismatchReason}`);
+          setFaceFeedbackType('error');
+          centeredFrameCountRef.current = 0;
+          setCapturedFace(imageDataUrl);
+          return;
+        }
+      }
+
       // All checks passed
       isRunningRef.current = false;
       if (faceDetectionIntervalRef.current) {
@@ -729,6 +880,7 @@ export default function SelfieLiveness() {
         capturedImageBase64: imageDataUrl,
         livenessScore: 100,
         aiVerified: true,
+        faceMatched: linkedIdImage ? true : null,
         timestamp: new Date().toISOString(),
         sessionId: sessionId,
       };
@@ -864,6 +1016,120 @@ export default function SelfieLiveness() {
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
             >
               I Consent & Continue
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Face Mismatch View (for combined verification)
+  if (faceMismatch && capturedFace) {
+    const handleRetry = () => {
+      setFaceMismatch(false);
+      setFaceMismatchDetails(null);
+      setCapturedFace(null);
+      setFaceVerified(false);
+      setFaceFeedback('Press Start to try again');
+      setFaceFeedbackType('info');
+      setLivenessScore(0);
+      centeredFrameCountRef.current = 0;
+      blinkCountRef.current = 0;
+      blinkDetectedRef.current = false;
+    };
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-100 flex flex-col">
+        <div className="bg-white shadow-sm sticky top-0 z-10">
+          <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-center">
+            <h1 className="font-semibold text-gray-900">Face Verification Failed</h1>
+          </div>
+        </div>
+
+        <div className="flex-1 flex flex-col items-center justify-center p-6">
+          <div className="w-full max-w-md">
+            <div className="text-center mb-6">
+              <div className="w-20 h-20 mx-auto bg-red-500 rounded-full flex items-center justify-center mb-4 shadow-lg">
+                <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </div>
+              <h1 className="text-2xl font-bold text-gray-900">Face Mismatch Detected</h1>
+              <p className="text-gray-600 mt-2">The selfie does not match the ID photo</p>
+            </div>
+
+            {/* Side by side comparison */}
+            <div className="bg-white rounded-2xl shadow-xl p-4 mb-6">
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="text-center">
+                  <div className="text-xs text-gray-500 mb-2">ID Photo</div>
+                  {linkedIdImage && (
+                    <img
+                      src={linkedIdImage}
+                      alt="ID Photo"
+                      className="w-full h-32 object-cover rounded-lg border-2 border-gray-200"
+                    />
+                  )}
+                </div>
+                <div className="text-center">
+                  <div className="text-xs text-gray-500 mb-2">Your Selfie</div>
+                  <img
+                    src={capturedFace}
+                    alt="Selfie"
+                    className="w-full h-32 object-cover rounded-lg border-2 border-red-300"
+                  />
+                </div>
+              </div>
+              
+              {faceMismatchDetails && (
+                <div className="border-t border-gray-100 pt-3">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-500">Face Similarity</span>
+                    <span className={`font-semibold ${faceMismatchDetails.confidence < 50 ? 'text-red-600' : 'text-orange-500'}`}>
+                      {faceMismatchDetails.confidence || 0}%
+                    </span>
+                  </div>
+                  {faceMismatchDetails.details?.faceApiDistance !== undefined && (
+                    <div className="mt-1 text-xs text-gray-400">
+                      Face-api.js distance: {faceMismatchDetails.details.faceApiDistance.toFixed(3)}
+                    </div>
+                  )}
+                  {faceMismatchDetails.reason && (
+                    <div className="mt-2 text-xs text-gray-600">
+                      {faceMismatchDetails.reason}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
+              <div className="flex gap-3">
+                <div className="text-amber-500 flex-shrink-0">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="font-semibold text-amber-800 text-sm">What to do?</div>
+                  <div className="text-amber-700 text-xs mt-1">
+                    • Ensure you are the person on the ID<br/>
+                    • Use better lighting for the selfie<br/>
+                    • Position your face similar to the ID photo<br/>
+                    • Remove glasses or accessories if different from ID
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={handleRetry}
+              className="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Try Again
             </button>
           </div>
         </div>
