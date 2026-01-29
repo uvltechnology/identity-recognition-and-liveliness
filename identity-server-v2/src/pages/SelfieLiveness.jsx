@@ -16,8 +16,11 @@ const MAX_FACE_SIZE_RATIO = 0.55;
 // Anti-spoofing thresholds
 const MIN_MICRO_MOVEMENT = 0.3;
 const MAX_STATIC_FRAMES = 15;
-const REQUIRED_BLINKS = 1;
 const HEAD_POSE_VARIANCE_MIN = 0.5;
+
+// Expression-based liveness detection
+const REQUIRED_EXPRESSIONS = ['happy', 'angry']; // Must show both expressions
+const EXPRESSION_CONFIDENCE_THRESHOLD = 0.5; // Minimum confidence to count expression
 
 export default function SelfieLiveness() {
   const { id: sessionId } = useParams();
@@ -28,19 +31,22 @@ export default function SelfieLiveness() {
   const frameHistoryRef = useRef([]);
   const lastFacePositionRef = useRef(null);
   const centeredFrameCountRef = useRef(0);
-  const blinkDetectedRef = useRef(false);
   const expressionChangeRef = useRef(false);
   const livenessScoreRef = useRef(0);
   const isRunningRef = useRef(false);
   const modelsLoadedRef = useRef(false);
   
   // Anti-spoofing refs
-  const blinkCountRef = useRef(0);
   const staticFrameCountRef = useRef(0);
   const lastLandmarksRef = useRef(null);
   const headPoseHistoryRef = useRef([]);
   const spoofDetectedRef = useRef(false);
-  const eyesClosedRef = useRef(false);
+  
+  // Expression-based liveness refs
+  const detectedExpressionsRef = useRef(new Set()); // Track which expressions have been shown
+  const currentExpressionRef = useRef(null);
+  const expressionHoldCountRef = useRef(0); // How many frames the current expression is held
+  const EXPRESSION_HOLD_REQUIRED = 3; // Must hold expression for 3 frames to count
 
   const [session, setSession] = useState(null);
   const [consentGiven, setConsentGiven] = useState(false);
@@ -55,6 +61,8 @@ export default function SelfieLiveness() {
   const [steadySeconds, setSteadySeconds] = useState(0);
   const [isCentered, setIsCentered] = useState(false);
   const [currentExpression, setCurrentExpression] = useState('');
+  const [detectedExpressions, setDetectedExpressions] = useState([]);
+  const [requiredExpression, setRequiredExpression] = useState(null); // Current expression to show
   const [faceLandmarks, setFaceLandmarks] = useState(null);
   const [faceBox, setFaceBox] = useState(null);
   const [linkedIdImage, setLinkedIdImage] = useState(null);
@@ -259,17 +267,19 @@ export default function SelfieLiveness() {
       frameHistoryRef.current = [];
       lastFacePositionRef.current = null;
       centeredFrameCountRef.current = 0;
-      blinkDetectedRef.current = false;
       expressionChangeRef.current = false;
       livenessScoreRef.current = 0;
       isRunningRef.current = true;
       
-      blinkCountRef.current = 0;
       staticFrameCountRef.current = 0;
       lastLandmarksRef.current = null;
       headPoseHistoryRef.current = [];
       spoofDetectedRef.current = false;
-      eyesClosedRef.current = false;
+      
+      // Reset expression detection
+      detectedExpressionsRef.current = new Set();
+      currentExpressionRef.current = null;
+      expressionHoldCountRef.current = 0;
 
       setFaceDetectionStarted(true);
       setLivenessScore(0);
@@ -277,7 +287,9 @@ export default function SelfieLiveness() {
       setFaceVerified(false);
       setIsCentered(false);
       setCurrentExpression('');
-      setFaceFeedback('👀 Look at the camera and blink');
+      setDetectedExpressions([]);
+      setRequiredExpression(REQUIRED_EXPRESSIONS[0]); // Start with first expression (happy/smile)
+      setFaceFeedback('😊 Please SMILE at the camera');
 
       startLivenessDetection();
     } catch (err) {
@@ -447,65 +459,98 @@ export default function SelfieLiveness() {
       if (detection.score > MIN_FACE_CONFIDENCE) indicators++;
       if (movement > MOVEMENT_THRESHOLD) indicators++;
 
+      // Expression-based liveness detection
+      const currentExpr = dominantExpression[0];
+      const currentExprConfidence = dominantExpression[1];
+      setCurrentExpression(currentExpr);
+
+      // Check if current expression matches what we're looking for
+      const nextRequiredExpr = REQUIRED_EXPRESSIONS.find(expr => !detectedExpressionsRef.current.has(expr));
+      
+      if (nextRequiredExpr && currentExprConfidence >= EXPRESSION_CONFIDENCE_THRESHOLD) {
+        if (currentExpr === nextRequiredExpr) {
+          // Same expression as required, increment hold count
+          if (currentExpressionRef.current === currentExpr) {
+            expressionHoldCountRef.current++;
+          } else {
+            currentExpressionRef.current = currentExpr;
+            expressionHoldCountRef.current = 1;
+          }
+          
+          // If held for enough frames, mark as detected
+          if (expressionHoldCountRef.current >= EXPRESSION_HOLD_REQUIRED) {
+            detectedExpressionsRef.current.add(currentExpr);
+            setDetectedExpressions([...detectedExpressionsRef.current]);
+            console.log(`Expression '${currentExpr}' detected! Completed: ${detectedExpressionsRef.current.size}/${REQUIRED_EXPRESSIONS.length}`);
+            
+            // Move to next required expression
+            const nextExpr = REQUIRED_EXPRESSIONS.find(expr => !detectedExpressionsRef.current.has(expr));
+            setRequiredExpression(nextExpr || null);
+            expressionHoldCountRef.current = 0;
+            currentExpressionRef.current = null;
+          }
+        } else {
+          // Different expression, reset hold count
+          currentExpressionRef.current = null;
+          expressionHoldCountRef.current = 0;
+        }
+      }
+
+      // Check if all expressions completed
+      const allExpressionsCompleted = REQUIRED_EXPRESSIONS.every(expr => detectedExpressionsRef.current.has(expr));
+      if (allExpressionsCompleted) expressionChangeRef.current = true;
+
       if (frameHistoryRef.current.length >= 5) {
-        const eyeRatios = frameHistoryRef.current.slice(-10).map(f => f.eyeRatio);
-        const eyeVariance = Math.max(...eyeRatios) - Math.min(...eyeRatios);
-        
-        const EYE_CLOSED_THRESHOLD = 0.24;
-        const EYE_OPEN_THRESHOLD = 0.26;
-        
-        if (eyeVariance > 0.04 && !blinkDetectedRef.current) {
-          blinkCountRef.current++;
-          console.log('Blink detected via variance! Count:', blinkCountRef.current, 'Variance:', eyeVariance);
-          if (blinkCountRef.current >= REQUIRED_BLINKS) {
-            blinkDetectedRef.current = true;
-          }
-        }
-        
-        if (avgEyeRatio < EYE_CLOSED_THRESHOLD && !eyesClosedRef.current) {
-          eyesClosedRef.current = true;
-          console.log('Eyes closed detected, ratio:', avgEyeRatio);
-        } else if (avgEyeRatio > EYE_OPEN_THRESHOLD && eyesClosedRef.current) {
-          eyesClosedRef.current = false;
-          blinkCountRef.current++;
-          console.log('Blink detected via state! Count:', blinkCountRef.current, 'Ratio:', avgEyeRatio);
-          if (blinkCountRef.current >= REQUIRED_BLINKS) {
-            blinkDetectedRef.current = true;
-          }
-        }
-        
-        const exprs = new Set(frameHistoryRef.current.slice(-10).map(f => f.expression));
-        if (exprs.size >= 2) expressionChangeRef.current = true;
         const xPos = frameHistoryRef.current.slice(-10).map(f => f.faceCenterX);
         const mean = xPos.reduce((a, b) => a + b, 0) / xPos.length;
         const variance = xPos.reduce((s, x) => s + Math.pow(x - mean, 2), 0) / xPos.length;
         if (variance > 5) indicators++;
       }
-      if (blinkDetectedRef.current) indicators++;
+      if (allExpressionsCompleted) indicators += 2; // Give bonus for completing expressions
       if (expressionChangeRef.current) indicators++;
 
       const isTooStatic = staticFrameCountRef.current > MAX_STATIC_FRAMES;
       const hasNoHeadMovement = headPoseHistoryRef.current.length >= 10 && headPoseVariance < HEAD_POSE_VARIANCE_MIN;
       
-      const potentialSpoof = (isTooStatic && hasNoHeadMovement) && !blinkDetectedRef.current;
+      // Check if all expressions completed for anti-spoof (reuse variable from above)
+      const potentialSpoof = (isTooStatic && hasNoHeadMovement) && !allExpressionsCompleted;
       
-      if (potentialSpoof && !blinkDetectedRef.current) {
+      if (potentialSpoof && !allExpressionsCompleted) {
         indicators = Math.max(0, indicators - 1);
         spoofDetectedRef.current = true;
-      } else if (blinkDetectedRef.current || microMovement > MIN_MICRO_MOVEMENT) {
+      } else if (allExpressionsCompleted || microMovement > MIN_MICRO_MOVEMENT) {
         spoofDetectedRef.current = false;
       }
 
       if (faceIsCentered) centeredFrameCountRef.current++;
       else centeredFrameCountRef.current = 0;
 
-      const frameScore = (indicators / 5) * 100;
+      const frameScore = (indicators / 6) * 100; // Updated divisor for new indicator count
       livenessScoreRef.current = livenessScoreRef.current * 0.7 + frameScore * 0.3;
       const score = Math.round(livenessScoreRef.current);
       setLivenessScore(score);
 
       const remaining = Math.max(0, Math.ceil((REQUIRED_CENTERED_FRAMES - centeredFrameCountRef.current) * 0.2));
       setSteadySeconds(remaining);
+
+      // Get expression emoji and name for feedback
+      const getExpressionEmoji = (expr) => {
+        switch(expr) {
+          case 'happy': return '😊';
+          case 'angry': return '😠';
+          case 'sad': return '😢';
+          case 'surprised': return '😲';
+          default: return '😐';
+        }
+      };
+      
+      const getExpressionName = (expr) => {
+        switch(expr) {
+          case 'happy': return 'SMILE';
+          case 'angry': return 'ANGRY FACE';
+          default: return expr.toUpperCase();
+        }
+      };
 
       if (!faceIsCentered) {
         const moveHorizontal = offsetX >= CENTER_TOLERANCE;
@@ -534,13 +579,19 @@ export default function SelfieLiveness() {
           setFaceFeedback('🚫 Please use a real face, not a photo');
         }
         setFaceFeedbackType('error');
-      } else if (blinkCountRef.current < REQUIRED_BLINKS) {
-        setFaceFeedback(`👁️ Blink ${REQUIRED_BLINKS - blinkCountRef.current} more time${REQUIRED_BLINKS - blinkCountRef.current > 1 ? 's' : ''}`);
+      } else if (!allExpressionsCompleted) {
+        // Show which expression is needed
+        const nextExpr = REQUIRED_EXPRESSIONS.find(expr => !detectedExpressionsRef.current.has(expr));
+        const completed = detectedExpressionsRef.current.size;
+        const total = REQUIRED_EXPRESSIONS.length;
+        const emoji = getExpressionEmoji(nextExpr);
+        const name = getExpressionName(nextExpr);
+        setFaceFeedback(`${emoji} Please show ${name} (${completed}/${total} done)`);
         setFaceFeedbackType('info');
       } else if (score < LIVENESS_REQUIRED_SCORE) {
         setFaceFeedback('🔄 Keep looking at the camera...');
         setFaceFeedbackType('info');
-      } else if (centeredFrameCountRef.current >= REQUIRED_CENTERED_FRAMES && blinkDetectedRef.current && !spoofDetectedRef.current && faceIsProperSize) {
+      } else if (centeredFrameCountRef.current >= REQUIRED_CENTERED_FRAMES && allExpressionsCompleted && !spoofDetectedRef.current && faceIsProperSize) {
         setFaceFeedback('📸 Perfect! Capturing...');
         setFaceFeedbackType('success');
         performCapture();
@@ -699,13 +750,14 @@ export default function SelfieLiveness() {
       setFaceFeedbackType('info');
 
       try {
+        const allExpressionsCompleted = REQUIRED_EXPRESSIONS.every(expr => detectedExpressionsRef.current.has(expr));
         const aiResponse = await fetch('/api/ai/face/liveness', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             image: imageDataUrl,
             livenessScore: livenessScoreRef.current,
-            movementDetected: blinkDetectedRef.current || expressionChangeRef.current,
+            movementDetected: allExpressionsCompleted || expressionChangeRef.current,
           }),
         });
 
@@ -753,15 +805,20 @@ export default function SelfieLiveness() {
           if (idDetection && selfieDetection) {
             // Calculate euclidean distance between face descriptors
             // Lower distance = more similar faces
-            // Stricter threshold: 0.5 for match (was 0.6)
+            // VERY Age-tolerant threshold: 0.70 (accounts for significant aging 10+ years)
+            // - 0.4-0.5 = strong match (same person, recent photo)
+            // - 0.5-0.60 = good match (same person, some age difference)
+            // - 0.60-0.70 = moderate match (same person, significant age change)
+            // - 0.70-0.80 = weak match (possible same person with 10+ years age change)
+            // - >0.80 = different person
+            // Note: 35% similarity = 0.65 distance, so threshold 0.70 allows 30%+ similarity
             const distance = faceapi.euclideanDistance(idDetection.descriptor, selfieDetection.descriptor);
             faceApiDistance = distance;
-            faceApiMatch = distance < 0.5; // Stricter threshold for face recognition
+            faceApiMatch = distance < 0.70; // Very age-tolerant threshold (allows 30%+ similarity)
 
-            console.log('[FaceComparison] Face-api.js distance:', distance, 'Match:', faceApiMatch);
+            console.log('[FaceComparison] Face-api.js distance:', distance, 'Match:', faceApiMatch, '(threshold: 0.70)');
           } else {
             console.warn('[FaceComparison] Could not detect face in one or both images');
-            // If we can't detect face in ID, this is suspicious
             if (!idDetection) {
               console.warn('[FaceComparison] No face detected in ID image');
             }
@@ -773,7 +830,7 @@ export default function SelfieLiveness() {
           console.warn('[FaceComparison] Face-api.js comparison failed:', faceApiErr);
         }
 
-        // AI comparison
+        // AI comparison (primary method - better at understanding aging)
         let aiMatch = null;
         let aiConfidence = null;
         let aiReason = null;
@@ -802,47 +859,79 @@ export default function SelfieLiveness() {
 
         console.log('[FaceComparison] Final Results - FaceAPI Match:', faceApiMatch, 'Distance:', faceApiDistance, 'AI Match:', aiMatch, 'AI Confidence:', aiConfidence);
 
-        // STRICT Combined decision logic:
-        // 1. If face-api.js detects mismatch (distance >= 0.5), FAIL regardless of AI
-        // 2. If AI says no match with confidence >= 50, FAIL regardless of face-api.js
-        // 3. If face-api.js couldn't detect faces but AI says no match, FAIL
-        // 4. Only pass if face-api.js says match (distance < 0.5) OR face-api.js unavailable AND AI says match
+        // AGE-AWARE Combined decision logic:
+        // Priority: AI comparison > face-api.js (AI better understands aging)
+        // 
+        // Decision Matrix (VERY AGE TOLERANT - for 10+ year age gaps):
+        // 1. AI says MATCH with confidence >= 60 → PASS (AI understands aging)
+        // 2. AI says MATCH with confidence 40-59 AND faceApi distance < 0.75 → PASS
+        // 3. AI says NO MATCH with confidence >= 70 → FAIL (high confidence different person)
+        // 4. AI says NO MATCH with confidence >= 50 AND faceApi distance >= 0.75 → FAIL
+        // 5. faceApi distance >= 0.80 AND AI unavailable → FAIL (clearly different)
+        // 6. faceApi distance < 0.70 AND AI unavailable → PASS (good match for aged photos)
+        // 7. Borderline cases: combine signals
+        // Note: 35% similarity = 0.65 distance, threshold allows 30%+ similarity to pass
 
         let finalMismatch = false;
         let mismatchReason = '';
+        const similarity = faceApiDistance !== null ? Math.round((1 - faceApiDistance) * 100) : null;
 
-        // Check face-api.js result first (most reliable for different people)
-        if (faceApiDistance !== null) {
-          if (faceApiDistance >= 0.5) {
-            // Face-api.js says different person - FAIL
+        // PASS CONDITIONS - Check first
+        let isMatch = false;
+
+        // AI says match with good confidence - TRUST IT (AI handles aging well)
+        if (aiMatch === true && aiConfidence >= 60) {
+          isMatch = true;
+          console.log('[FaceComparison] ✅ AI match with high confidence');
+        }
+        // AI says match with moderate confidence AND faceApi isn't strongly against
+        else if (aiMatch === true && aiConfidence >= 40 && (faceApiDistance === null || faceApiDistance < 0.75)) {
+          isMatch = true;
+          console.log('[FaceComparison] ✅ AI match with moderate confidence, faceApi neutral');
+        }
+        // FaceApi strong match AND AI unavailable or neutral
+        else if (faceApiDistance !== null && faceApiDistance < 0.60 && (aiMatch === null || aiMatch === true)) {
+          isMatch = true;
+          console.log('[FaceComparison] ✅ FaceApi strong match');
+        }
+        // FaceApi moderate match (age-tolerant) AND AI unavailable
+        else if (faceApiDistance !== null && faceApiDistance < 0.70 && aiMatch === null) {
+          isMatch = true;
+          console.log('[FaceComparison] ✅ FaceApi moderate match (age-tolerant), AI unavailable');
+        }
+
+        // FAIL CONDITIONS - Only if not already matched
+        if (!isMatch) {
+          // AI high confidence NO match
+          if (aiMatch === false && aiConfidence >= 70) {
             finalMismatch = true;
-            const similarity = Math.round((1 - faceApiDistance) * 100);
-            mismatchReason = `Face mismatch: ${similarity}% similarity (requires >50%)`;
-          } else if (faceApiDistance >= 0.4 && aiMatch === false) {
-            // Borderline case - face-api.js uncertain AND AI says no match - FAIL
-            finalMismatch = true;
-            const similarity = Math.round((1 - faceApiDistance) * 100);
-            mismatchReason = `Faces don't match: ${similarity}% similarity, AI confirms mismatch`;
+            mismatchReason = aiReason || `Face mismatch detected (${aiConfidence}% confidence)`;
+            console.log('[FaceComparison] ❌ AI high confidence mismatch');
           }
-        }
-
-        // Check AI result (catches cases face-api.js might miss)
-        if (!finalMismatch && aiMatch === false && aiConfidence >= 50) {
-          // AI is confident it's not the same person - FAIL
-          finalMismatch = true;
-          mismatchReason = aiReason || `AI detected different person (${aiConfidence}% confidence)`;
-        }
-
-        // If face-api.js couldn't detect faces, rely more on AI
-        if (!finalMismatch && faceApiDistance === null && aiMatch === false && aiConfidence >= 40) {
-          finalMismatch = true;
-          mismatchReason = aiReason || 'Could not verify face match - AI detected mismatch';
+          // AI moderate confidence NO match AND faceApi also disagrees (more tolerant threshold)
+          else if (aiMatch === false && aiConfidence >= 50 && faceApiDistance !== null && faceApiDistance >= 0.75) {
+            finalMismatch = true;
+            mismatchReason = `Face verification failed: ${similarity}% similarity, AI also detected mismatch`;
+            console.log('[FaceComparison] ❌ Both AI and faceApi say mismatch');
+          }
+          // FaceApi clearly different AND AI not strongly supporting match (very tolerant)
+          else if (faceApiDistance !== null && faceApiDistance >= 0.80 && aiMatch !== true) {
+            finalMismatch = true;
+            mismatchReason = `Face mismatch: ${similarity}% similarity (too different)`;
+            console.log('[FaceComparison] ❌ FaceApi very high distance');
+          }
+          // AI unavailable but faceApi clearly different (more tolerant)
+          else if (aiMatch === null && faceApiDistance !== null && faceApiDistance >= 0.75) {
+            finalMismatch = true;
+            mismatchReason = `Face verification failed: ${similarity}% similarity`;
+            console.log('[FaceComparison] ❌ AI unavailable, faceApi mismatch');
+          }
         }
 
         if (finalMismatch) {
           setFaceMismatch(true);
           setFaceMismatchDetails({
-            confidence: faceApiDistance !== null ? Math.round((1 - faceApiDistance) * 100) : (100 - (aiConfidence || 50)),
+            confidence: similarity || (100 - (aiConfidence || 50)),
             reason: mismatchReason,
             details: {
               faceApiDistance,
@@ -929,16 +1018,18 @@ export default function SelfieLiveness() {
     setSteadySeconds(0);
     setIsCentered(false);
     setCurrentExpression('');
+    setDetectedExpressions([]);
+    setRequiredExpression(REQUIRED_EXPRESSIONS[0]);
     setFaceLandmarks(null);
     setFaceBox(null);
-    blinkDetectedRef.current = false;
     expressionChangeRef.current = false;
-    blinkCountRef.current = 0;
     staticFrameCountRef.current = 0;
     lastLandmarksRef.current = null;
     headPoseHistoryRef.current = [];
     spoofDetectedRef.current = false;
-    eyesClosedRef.current = false;
+    detectedExpressionsRef.current = new Set();
+    currentExpressionRef.current = null;
+    expressionHoldCountRef.current = 0;
   };
 
   const downloadFace = () => {
@@ -1033,9 +1124,12 @@ export default function SelfieLiveness() {
       setFaceFeedback('Press Start to try again');
       setFaceFeedbackType('info');
       setLivenessScore(0);
+      setDetectedExpressions([]);
+      setRequiredExpression(REQUIRED_EXPRESSIONS[0]);
       centeredFrameCountRef.current = 0;
-      blinkCountRef.current = 0;
-      blinkDetectedRef.current = false;
+      detectedExpressionsRef.current = new Set();
+      currentExpressionRef.current = null;
+      expressionHoldCountRef.current = 0;
     };
 
     return (
@@ -1415,8 +1509,8 @@ export default function SelfieLiveness() {
         {faceDetectionStarted && (
           <div className="flex justify-center gap-3 mt-4">
             <div className={`w-3 h-3 rounded-full ${isCentered ? 'bg-green-500' : 'bg-white/30'}`} title="Centered" />
-            <div className={`w-3 h-3 rounded-full ${blinkDetectedRef.current ? 'bg-green-500' : 'bg-white/30'}`} title="Blink" />
-            <div className={`w-3 h-3 rounded-full ${expressionChangeRef.current ? 'bg-green-500' : 'bg-white/30'}`} title="Expression" />
+            <div className={`w-3 h-3 rounded-full ${detectedExpressions.includes('happy') ? 'bg-green-500' : 'bg-white/30'}`} title="Smile 😊" />
+            <div className={`w-3 h-3 rounded-full ${detectedExpressions.includes('angry') ? 'bg-green-500' : 'bg-white/30'}`} title="Angry 😠" />
             <div className={`w-3 h-3 rounded-full ${livenessScore >= 60 ? 'bg-green-500' : 'bg-white/30'}`} title="Liveness" />
           </div>
         )}

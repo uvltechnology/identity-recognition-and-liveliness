@@ -15,8 +15,11 @@ const MAX_FACE_SIZE_RATIO = 0.55;  // Face should be at most 55% of video height
 // Anti-spoofing thresholds
 const MIN_MICRO_MOVEMENT = 0.3;       // Lowered - real faces have subtle micro-movements
 const MAX_STATIC_FRAMES = 15;         // Increased - allow more still frames before flagging
-const REQUIRED_BLINKS = 1;            // Require 1 blink (blink is the main liveness check)
 const HEAD_POSE_VARIANCE_MIN = 0.5;   // Lowered - natural head sway is subtle
+
+// Expression-based liveness detection
+const REQUIRED_EXPRESSIONS = ['happy', 'angry']; // Must show both expressions
+const EXPRESSION_CONFIDENCE_THRESHOLD = 0.5; // Minimum confidence to count expression
 
 export default function SelfieLivenessTest() {
   const faceVideoRef = useRef(null);
@@ -26,19 +29,22 @@ export default function SelfieLivenessTest() {
   const frameHistoryRef = useRef([]);
   const lastFacePositionRef = useRef(null);
   const centeredFrameCountRef = useRef(0);
-  const blinkDetectedRef = useRef(false);
   const expressionChangeRef = useRef(false);
   const livenessScoreRef = useRef(0);
   const isRunningRef = useRef(false);
   const modelsLoadedRef = useRef(false);
   
   // Anti-spoofing refs
-  const blinkCountRef = useRef(0);
   const staticFrameCountRef = useRef(0);
   const lastLandmarksRef = useRef(null);
   const headPoseHistoryRef = useRef([]);
   const spoofDetectedRef = useRef(false);
-  const eyesClosedRef = useRef(false);  // Track if eyes are currently closed
+  
+  // Expression-based liveness refs
+  const detectedExpressionsRef = useRef(new Set()); // Track which expressions have been shown
+  const currentExpressionRef = useRef(null);
+  const expressionHoldCountRef = useRef(0); // How many frames the current expression is held
+  const EXPRESSION_HOLD_REQUIRED = 3; // Must hold expression for 3 frames to count
 
   const [faceDetectionStarted, setFaceDetectionStarted] = useState(false);
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -50,6 +56,8 @@ export default function SelfieLivenessTest() {
   const [steadySeconds, setSteadySeconds] = useState(0);
   const [isCentered, setIsCentered] = useState(false);
   const [currentExpression, setCurrentExpression] = useState('');
+  const [detectedExpressions, setDetectedExpressions] = useState([]);
+  const [requiredExpression, setRequiredExpression] = useState(null);
   const [faceLandmarks, setFaceLandmarks] = useState(null);
   const [faceBox, setFaceBox] = useState(null);
   const overlayCanvasRef = useRef(null);
@@ -148,18 +156,20 @@ export default function SelfieLivenessTest() {
       frameHistoryRef.current = [];
       lastFacePositionRef.current = null;
       centeredFrameCountRef.current = 0;
-      blinkDetectedRef.current = false;
       expressionChangeRef.current = false;
       livenessScoreRef.current = 0;
       isRunningRef.current = true;
       
       // Reset anti-spoofing refs
-      blinkCountRef.current = 0;
       staticFrameCountRef.current = 0;
       lastLandmarksRef.current = null;
       headPoseHistoryRef.current = [];
       spoofDetectedRef.current = false;
-      eyesClosedRef.current = false;
+      
+      // Reset expression detection
+      detectedExpressionsRef.current = new Set();
+      currentExpressionRef.current = null;
+      expressionHoldCountRef.current = 0;
 
       setFaceDetectionStarted(true);
       setLivenessScore(0);
@@ -167,7 +177,9 @@ export default function SelfieLivenessTest() {
       setFaceVerified(false);
       setIsCentered(false);
       setCurrentExpression('');
-      setFaceFeedback('👀 Look at the camera and blink');
+      setDetectedExpressions([]);
+      setRequiredExpression(REQUIRED_EXPRESSIONS[0]);
+      setFaceFeedback('😊 Please SMILE at the camera');
 
       startLivenessDetection();
     } catch (err) {
@@ -387,71 +399,75 @@ export default function SelfieLivenessTest() {
       if (detection.score > MIN_FACE_CONFIDENCE) indicators++;
       if (movement > MOVEMENT_THRESHOLD) indicators++;
 
+      // Expression-based liveness detection
+      const currentExpr = dominantExpression[0];
+      const currentExprConfidence = dominantExpression[1];
+      setCurrentExpression(currentExpr);
+
+      // Check if current expression matches what we're looking for
+      const nextRequiredExpr = REQUIRED_EXPRESSIONS.find(expr => !detectedExpressionsRef.current.has(expr));
+      
+      if (nextRequiredExpr && currentExprConfidence >= EXPRESSION_CONFIDENCE_THRESHOLD) {
+        if (currentExpr === nextRequiredExpr) {
+          // Same expression as required, increment hold count
+          if (currentExpressionRef.current === currentExpr) {
+            expressionHoldCountRef.current++;
+          } else {
+            currentExpressionRef.current = currentExpr;
+            expressionHoldCountRef.current = 1;
+          }
+          
+          // If held for enough frames, mark as detected
+          if (expressionHoldCountRef.current >= EXPRESSION_HOLD_REQUIRED) {
+            detectedExpressionsRef.current.add(currentExpr);
+            setDetectedExpressions([...detectedExpressionsRef.current]);
+            console.log(`Expression '${currentExpr}' detected! Completed: ${detectedExpressionsRef.current.size}/${REQUIRED_EXPRESSIONS.length}`);
+            
+            // Move to next required expression
+            const nextExpr = REQUIRED_EXPRESSIONS.find(expr => !detectedExpressionsRef.current.has(expr));
+            setRequiredExpression(nextExpr || null);
+            expressionHoldCountRef.current = 0;
+            currentExpressionRef.current = null;
+          }
+        } else {
+          // Different expression, reset hold count
+          currentExpressionRef.current = null;
+          expressionHoldCountRef.current = 0;
+        }
+      }
+
+      // Check if all expressions completed
+      const allExpressionsCompleted = REQUIRED_EXPRESSIONS.every(expr => detectedExpressionsRef.current.has(expr));
+      if (allExpressionsCompleted) expressionChangeRef.current = true;
+
       if (frameHistoryRef.current.length >= 5) {
-        const eyeRatios = frameHistoryRef.current.slice(-10).map(f => f.eyeRatio);
-        const eyeVariance = Math.max(...eyeRatios) - Math.min(...eyeRatios);
-        
-        // === ANTI-SPOOFING: Improved blink detection with counting ===
-        // More lenient thresholds for easier blink detection
-        const EYE_CLOSED_THRESHOLD = 0.24;  // Higher = easier to detect as closed
-        const EYE_OPEN_THRESHOLD = 0.26;    // Lower gap = easier transition
-        
-        // Also detect blink from eye ratio variance (backup method)
-        if (eyeVariance > 0.04 && !blinkDetectedRef.current) {
-          // Significant eye ratio change detected - count as blink
-          blinkCountRef.current++;
-          console.log('Blink detected via variance! Count:', blinkCountRef.current, 'Variance:', eyeVariance);
-          if (blinkCountRef.current >= REQUIRED_BLINKS) {
-            blinkDetectedRef.current = true;
-          }
-        }
-        
-        // State machine method (primary)
-        if (avgEyeRatio < EYE_CLOSED_THRESHOLD && !eyesClosedRef.current) {
-          // Eyes just closed
-          eyesClosedRef.current = true;
-          console.log('Eyes closed detected, ratio:', avgEyeRatio);
-        } else if (avgEyeRatio > EYE_OPEN_THRESHOLD && eyesClosedRef.current) {
-          // Eyes just opened after being closed = blink complete
-          eyesClosedRef.current = false;
-          blinkCountRef.current++;
-          console.log('Blink detected via state! Count:', blinkCountRef.current, 'Ratio:', avgEyeRatio);
-          if (blinkCountRef.current >= REQUIRED_BLINKS) {
-            blinkDetectedRef.current = true;
-          }
-        }
-        
-        const exprs = new Set(frameHistoryRef.current.slice(-10).map(f => f.expression));
-        if (exprs.size >= 2) expressionChangeRef.current = true;
         const xPos = frameHistoryRef.current.slice(-10).map(f => f.faceCenterX);
         const mean = xPos.reduce((a, b) => a + b, 0) / xPos.length;
         const variance = xPos.reduce((s, x) => s + Math.pow(x - mean, 2), 0) / xPos.length;
         if (variance > 5) indicators++;
       }
-      if (blinkDetectedRef.current) indicators++;
+      if (allExpressionsCompleted) indicators += 2; // Give bonus for completing expressions
       if (expressionChangeRef.current) indicators++;
 
       // === ANTI-SPOOFING: Check for photo/spoof indicators ===
       const isTooStatic = staticFrameCountRef.current > MAX_STATIC_FRAMES;
       const hasNoHeadMovement = headPoseHistoryRef.current.length >= 10 && headPoseVariance < HEAD_POSE_VARIANCE_MIN;
       
-      // Only flag as spoof if BOTH conditions are met AND no blink detected
-      // Blink detection is the strongest proof of a real face
-      const potentialSpoof = (isTooStatic && hasNoHeadMovement) && !blinkDetectedRef.current;
+      // Only flag as spoof if BOTH conditions are met AND expressions not completed
+      const potentialSpoof = (isTooStatic && hasNoHeadMovement) && !allExpressionsCompleted;
       
-      // Penalize score for spoof indicators (only if no blink yet)
-      if (potentialSpoof && !blinkDetectedRef.current) {
+      // Penalize score for spoof indicators
+      if (potentialSpoof && !allExpressionsCompleted) {
         indicators = Math.max(0, indicators - 1);
         spoofDetectedRef.current = true;
-      } else if (blinkDetectedRef.current || microMovement > MIN_MICRO_MOVEMENT) {
-        // Clear spoof flag if blink detected or movement detected
+      } else if (allExpressionsCompleted || microMovement > MIN_MICRO_MOVEMENT) {
         spoofDetectedRef.current = false;
       }
 
       if (faceIsCentered) centeredFrameCountRef.current++;
       else centeredFrameCountRef.current = 0;
 
-      const frameScore = (indicators / 5) * 100;
+      const frameScore = (indicators / 6) * 100; // Updated divisor
       livenessScoreRef.current = livenessScoreRef.current * 0.7 + frameScore * 0.3;
       const score = Math.round(livenessScoreRef.current);
       setLivenessScore(score);
@@ -459,18 +475,32 @@ export default function SelfieLivenessTest() {
       const remaining = Math.max(0, Math.ceil((REQUIRED_CENTERED_FRAMES - centeredFrameCountRef.current) * 0.2));
       setSteadySeconds(remaining);
 
+      // Get expression emoji and name for feedback
+      const getExpressionEmoji = (expr) => {
+        switch(expr) {
+          case 'happy': return '😊';
+          case 'angry': return '😠';
+          default: return '😐';
+        }
+      };
+      
+      const getExpressionName = (expr) => {
+        switch(expr) {
+          case 'happy': return 'SMILE';
+          case 'angry': return 'ANGRY FACE';
+          default: return expr.toUpperCase();
+        }
+      };
+
       if (!faceIsCentered) {
-        // Directions match mirrored view (scaleX(-1) applied to video)
         const moveHorizontal = offsetX >= CENTER_TOLERANCE;
         const moveVertical = offsetY >= CENTER_TOLERANCE;
         
         if (moveHorizontal && moveVertical) {
-          // Need to move both directions
           const hDir = faceCenterX < videoCenterX ? '← Move left' : '→ Move right';
           const vDir = faceCenterY < videoCenterY ? '↓ Move down' : '↑ Move up';
           setFaceFeedback(`${hDir} and ${vDir}`);
         } else if (moveHorizontal) {
-          // With mirror applied: if face appears on left, user moves left to center
           setFaceFeedback(faceCenterX < videoCenterX ? '← Move left' : '→ Move right');
         } else if (moveVertical) {
           setFaceFeedback(faceCenterY < videoCenterY ? '↓ Move face down' : '↑ Move face up');
@@ -483,20 +513,25 @@ export default function SelfieLivenessTest() {
         setFaceFeedback('📏 Move closer to camera');
         setFaceFeedbackType('warning');
       } else if (spoofDetectedRef.current) {
-        // Anti-spoofing feedback
         if (staticFrameCountRef.current > MAX_STATIC_FRAMES) {
           setFaceFeedback('🚫 Move your head slightly');
         } else {
           setFaceFeedback('🚫 Please use a real face, not a photo');
         }
         setFaceFeedbackType('error');
-      } else if (blinkCountRef.current < REQUIRED_BLINKS) {
-        setFaceFeedback(`👁️ Blink ${REQUIRED_BLINKS - blinkCountRef.current} more time${REQUIRED_BLINKS - blinkCountRef.current > 1 ? 's' : ''}`);
+      } else if (!allExpressionsCompleted) {
+        // Show which expression is needed
+        const nextExpr = REQUIRED_EXPRESSIONS.find(expr => !detectedExpressionsRef.current.has(expr));
+        const completed = detectedExpressionsRef.current.size;
+        const total = REQUIRED_EXPRESSIONS.length;
+        const emoji = getExpressionEmoji(nextExpr);
+        const name = getExpressionName(nextExpr);
+        setFaceFeedback(`${emoji} Please show ${name} (${completed}/${total} done)`);
         setFaceFeedbackType('info');
       } else if (score < LIVENESS_REQUIRED_SCORE) {
         setFaceFeedback('🔄 Keep looking at the camera...');
         setFaceFeedbackType('info');
-      } else if (centeredFrameCountRef.current >= REQUIRED_CENTERED_FRAMES && blinkDetectedRef.current && !spoofDetectedRef.current && faceIsProperSize) {
+      } else if (centeredFrameCountRef.current >= REQUIRED_CENTERED_FRAMES && allExpressionsCompleted && !spoofDetectedRef.current && faceIsProperSize) {
         setFaceFeedback('📸 Perfect! Capturing...');
         setFaceFeedbackType('success');
         performCapture();
@@ -683,13 +718,14 @@ export default function SelfieLivenessTest() {
       setFaceFeedbackType('info');
 
       try {
+        const allExpressionsCompleted = REQUIRED_EXPRESSIONS.every(expr => detectedExpressionsRef.current.has(expr));
         const aiResponse = await fetch('/api/ai/face/liveness', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             image: imageDataUrl,
             livenessScore: livenessScoreRef.current,
-            movementDetected: blinkDetectedRef.current || expressionChangeRef.current,
+            movementDetected: allExpressionsCompleted || expressionChangeRef.current,
           }),
         });
 
@@ -741,16 +777,18 @@ export default function SelfieLivenessTest() {
     setSteadySeconds(0);
     setIsCentered(false);
     setCurrentExpression('');
+    setDetectedExpressions([]);
+    setRequiredExpression(REQUIRED_EXPRESSIONS[0]);
     setFaceLandmarks(null);
     setFaceBox(null);
-    blinkDetectedRef.current = false;
     expressionChangeRef.current = false;
-    blinkCountRef.current = 0;
     staticFrameCountRef.current = 0;
     lastLandmarksRef.current = null;
     headPoseHistoryRef.current = [];
     spoofDetectedRef.current = false;
-    eyesClosedRef.current = false;
+    detectedExpressionsRef.current = new Set();
+    currentExpressionRef.current = null;
+    expressionHoldCountRef.current = 0;
   };
 
   const downloadFace = () => {
@@ -1092,8 +1130,8 @@ export default function SelfieLivenessTest() {
         {faceDetectionStarted && (
           <div className="flex justify-center gap-3 mt-4">
             <div className={`w-3 h-3 rounded-full ${isCentered ? 'bg-green-500' : 'bg-white/30'}`} title="Centered" />
-            <div className={`w-3 h-3 rounded-full ${blinkDetectedRef.current ? 'bg-green-500' : 'bg-white/30'}`} title="Blink" />
-            <div className={`w-3 h-3 rounded-full ${expressionChangeRef.current ? 'bg-green-500' : 'bg-white/30'}`} title="Expression" />
+            <div className={`w-3 h-3 rounded-full ${detectedExpressions.includes('happy') ? 'bg-green-500' : 'bg-white/30'}`} title="Smile 😊" />
+            <div className={`w-3 h-3 rounded-full ${detectedExpressions.includes('angry') ? 'bg-green-500' : 'bg-white/30'}`} title="Angry 😠" />
             <div className={`w-3 h-3 rounded-full ${livenessScore >= 60 ? 'bg-green-500' : 'bg-white/30'}`} title="Liveness" />
           </div>
         )}
