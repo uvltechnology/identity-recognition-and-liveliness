@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import Header from '../components/Header';
+import { FaIdBadge, FaUserCheck, FaBook, FaFlag, FaRobot, FaEye, FaBolt } from 'react-icons/fa';
 
 export default function HomePage() {
   return (
@@ -23,7 +24,7 @@ export default function HomePage() {
             to="/id-verification-test"
             className="flex flex-col items-center justify-center rounded-xl bg-white border-2 border-blue-100 hover:border-blue-300 px-4 py-5 sm:py-6 text-center shadow-sm hover:shadow-md transition-all"
           >
-            <span className="text-3xl sm:text-4xl mb-2">🪪</span>
+            <FaIdBadge className="text-3xl sm:text-4xl mb-2 text-blue-500" />
             <span className="font-semibold text-gray-900 text-sm sm:text-base">ID Verification</span>
             <span className="text-xs text-gray-500 mt-1">Scan & extract ID data</span>
           </Link>
@@ -31,7 +32,7 @@ export default function HomePage() {
             to="/selfie-liveness-test"
             className="flex flex-col items-center justify-center rounded-xl bg-white border-2 border-purple-100 hover:border-purple-300 px-4 py-5 sm:py-6 text-center shadow-sm hover:shadow-md transition-all"
           >
-            <span className="text-3xl sm:text-4xl mb-2">🤳</span>
+            <FaUserCheck className="text-3xl sm:text-4xl mb-2 text-purple-500" />
             <span className="font-semibold text-gray-900 text-sm sm:text-base">Selfie Liveness</span>
             <span className="text-xs text-gray-500 mt-1">Real-time face detection</span>
           </Link>
@@ -39,7 +40,7 @@ export default function HomePage() {
             to="/docs"
             className="flex flex-col items-center justify-center rounded-xl bg-white border-2 border-gray-100 hover:border-gray-300 px-4 py-5 sm:py-6 text-center shadow-sm hover:shadow-md transition-all"
           >
-            <span className="text-3xl sm:text-4xl mb-2">📚</span>
+            <FaBook className="text-3xl sm:text-4xl mb-2 text-gray-600" />
             <span className="font-semibold text-gray-900 text-sm sm:text-base">API Docs</span>
             <span className="text-xs text-gray-500 mt-1">Integration guide</span>
           </Link>
@@ -96,13 +97,13 @@ export default function HomePage() {
         {/* Features */}
         <div className="mt-8 sm:mt-12 grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
           {[
-            { icon: '🇵🇭', label: '8 ID Types', desc: 'Philippine IDs' },
-            { icon: '🤖', label: 'AI Powered', desc: 'Gemini extraction' },
-            { icon: '👁️', label: 'Liveness', desc: 'Anti-spoofing' },
-            { icon: '⚡', label: 'Real-time', desc: 'Fast processing' },
+            { icon: FaFlag, label: '8 ID Types', desc: 'Philippine IDs', color: 'text-red-500' },
+            { icon: FaRobot, label: 'AI Powered', desc: 'Gemini extraction', color: 'text-blue-500' },
+            { icon: FaEye, label: 'Liveness', desc: 'Anti-spoofing', color: 'text-green-500' },
+            { icon: FaBolt, label: 'Real-time', desc: 'Fast processing', color: 'text-yellow-500' },
           ].map((feature) => (
             <div key={feature.label} className="bg-white rounded-lg p-3 sm:p-4 text-center border border-gray-100">
-              <span className="text-xl sm:text-2xl">{feature.icon}</span>
+              <feature.icon className={`text-xl sm:text-2xl mx-auto ${feature.color}`} />
               <p className="font-medium text-gray-900 text-xs sm:text-sm mt-1">{feature.label}</p>
               <p className="text-xs text-gray-500">{feature.desc}</p>
             </div>

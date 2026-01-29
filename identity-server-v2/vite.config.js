@@ -49,7 +49,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     ssr: {
-      noExternal: ['react-router-dom'],
+      noExternal: ['react-router-dom', 'react-icons'],
     },
   };
 });

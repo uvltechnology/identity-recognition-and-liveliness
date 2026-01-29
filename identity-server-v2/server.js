@@ -852,9 +852,49 @@ async function createServer() {
           status: 'pending',
           payload: { idType: 'national-id', testMode: false },
           createdAt: new Date().toISOString(),
+          extractedData: null,
+          verificationResult: null,
         });
       }
-      return res.json(session);
+      
+      // Build response with verification results
+      const response = {
+        id: session.id || req.params.id,
+        status: session.status || 'pending',
+        payload: session.payload || {},
+        createdAt: session.createdAt,
+        extractedData: null,
+        verificationResult: null,
+      };
+      
+      // Include extracted data if available
+      if (session.result?.fields) {
+        response.extractedData = session.result.fields;
+      } else if (session.result && typeof session.result === 'object' && !session.result.fields) {
+        // Handle case where result is the fields directly
+        response.extractedData = session.result;
+      }
+      
+      // Include verification result details
+      const terminalStatuses = ['done', 'completed', 'success', 'failed', 'cancelled', 'canceled', 'expired'];
+      if (terminalStatuses.includes((session.status || '').toLowerCase())) {
+        response.verificationResult = {
+          status: ['done', 'completed', 'success'].includes((session.status || '').toLowerCase()) ? 'success' : 'failed',
+          completedAt: session.finishedAt || null,
+        };
+        
+        // Include face match data if available (from selfie verification)
+        if (session.result?.faceMatch) {
+          response.verificationResult.faceMatch = session.result.faceMatch;
+        }
+        
+        // Include failure reason if available
+        if (session.result?.reason || session.reason) {
+          response.verificationResult.reason = session.result?.reason || session.reason;
+        }
+      }
+      
+      return res.json(response);
     } catch (e) {
       res.status(500).json({ success: false, error: 'Failed to read session' });
     }
