@@ -73,7 +73,7 @@ async function safePostWebhook(url, body) {
 
 async function createServer() {
   const app = express();
-  
+
   // CORS and body parsing
   app.use(cors());
   app.use(express.json({ limit: '10mb' }));
@@ -98,11 +98,11 @@ async function createServer() {
   }
 
   // ===== API Routes =====
-  
+
   // Health check
   app.get('/api/health', (req, res) => {
-    res.json({ 
-      status: 'ok', 
+    res.json({
+      status: 'ok',
       timestamp: new Date().toISOString(),
       geminiEnabled: geminiService.enabled,
       geminiModel: geminiService.modelId
@@ -127,7 +127,7 @@ async function createServer() {
       ],
     });
   });
-
+  
   // AI extraction endpoint - unified for all ID types
   app.post('/api/ai/:idType/parse', async (req, res) => {
     try {
@@ -143,9 +143,9 @@ async function createServer() {
       console.log(`[AI/${idType}] Scanning result:`, JSON.stringify(scanningResult, null, 2));
 
       // If scanning got all required fields, return early
-      const hasAllFields = scanningResult.firstName && scanningResult.lastName && 
-                           (scanningResult.idNumber || scanningResult.birthDate);
-      
+      const hasAllFields = scanningResult.firstName && scanningResult.lastName &&
+        (scanningResult.idNumber || scanningResult.birthDate);
+
       if (hasAllFields) {
         console.log(`[AI/${idType}] Scanning extracted all fields, skipping AI`);
         return res.json({
@@ -239,7 +239,7 @@ async function createServer() {
   app.post('/api/ai/face/liveness', async (req, res) => {
     try {
       const { image, livenessScore, movementDetected } = req.body || {};
-      
+
       if (!image) {
         return res.status(400).json({ success: false, error: 'image is required' });
       }
@@ -253,7 +253,7 @@ async function createServer() {
       }
 
       const result = await geminiService.verifyFaceLiveness(image, { livenessScore, movementDetected });
-      
+
       if (result.error) {
         return res.json({
           isLive: livenessScore >= 70 && movementDetected,
@@ -274,7 +274,7 @@ async function createServer() {
   app.post('/api/ai/id/quality-check', async (req, res) => {
     try {
       const { image } = req.body || {};
-      
+
       if (!image) {
         return res.status(400).json({ success: false, error: 'image is required' });
       }
@@ -294,7 +294,7 @@ async function createServer() {
       }
 
       const result = await geminiService.checkIdImageQuality(image);
-      
+
       if (result.error) {
         // On error, allow processing but note the issue
         return res.json({
@@ -320,7 +320,7 @@ async function createServer() {
   app.post('/api/ai/face/compare', async (req, res) => {
     try {
       const { idImage, selfieImage } = req.body || {};
-      
+
       if (!idImage || !selfieImage) {
         return res.status(400).json({ success: false, error: 'idImage and selfieImage are required' });
       }
@@ -339,7 +339,7 @@ async function createServer() {
       }
 
       const result = await geminiService.compareFaces(idImage, selfieImage);
-      
+
       if (result.error) {
         // On error, skip comparison
         return res.json({
@@ -428,40 +428,40 @@ async function createServer() {
           if (result.success) {
             const rawText = result.basicText?.text || result.structuredText?.text || '';
             const currentIdType = idType || 'unknown';
-            
+
             console.log(`[OCR] Processing ${currentIdType}, raw text length: ${rawText.length}`);
-            
+
             // === STEP 1: Scanning Algorithm (PRIMARY - extract from raw text) ===
             const scanningFields = scanningExtract(rawText, currentIdType);
             console.log('[Scanning] Extracted:', JSON.stringify(scanningFields, null, 2));
             result.scanning = scanningFields;
-            
+
             // Start with scanning results
             let fields = { ...scanningFields };
-            
+
             // === STEP 2: AI Verification (uses image + raw text to verify/polish) ===
             if (geminiService.enabled) {
               try {
                 console.log('[AI] Verifying with image + raw text...');
                 const aiVerified = await geminiService.verifyAndPolishFields(
-                  base64Data, 
-                  rawText, 
-                  scanningFields, 
+                  base64Data,
+                  rawText,
+                  scanningFields,
                   currentIdType
                 );
-                
+
                 if (aiVerified && !aiVerified.error) {
                   fields = aiVerified;
                   result.aiVerified = true;
                   result.corrections = aiVerified.corrections || [];
                   console.log('[AI] Verified:', JSON.stringify(aiVerified, null, 2));
                 }
-              } catch (e) { 
+              } catch (e) {
                 console.warn('AI verification failed:', e.message);
                 result.aiVerified = false;
               }
             }
-            
+
             result.fields = fields;
             result.rawText = rawText;
 
@@ -521,12 +521,12 @@ async function createServer() {
       const payload = req.body || {};
       const sessionId = makeSessionId();
       const storedPayload = { ...payload };
-      
-      const sessionObj = { 
-        id: sessionId, 
-        createdAt: Date.now(), 
-        payload: storedPayload, 
-        status: 'pending' 
+
+      const sessionObj = {
+        id: sessionId,
+        createdAt: Date.now(),
+        payload: storedPayload,
+        status: 'pending'
       };
       const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 3600);
       await setSession(sessionId, sessionObj, ttl);
@@ -554,7 +554,7 @@ async function createServer() {
     try {
       const payload = req.body || {};
       const sessionId = makeSessionId();
-      
+
       const sessionObj = {
         id: sessionId,
         createdAt: Date.now(),
@@ -565,7 +565,7 @@ async function createServer() {
         },
         status: 'pending'
       };
-      
+
       const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 3600);
       await setSession(sessionId, sessionObj, ttl);
 
@@ -575,10 +575,10 @@ async function createServer() {
       const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
 
       console.log("Created ID verification session:", sessionId, "idType:", payload.idType || 'national-id');
-      res.json({ 
-        success: true, 
-        sessionId, 
-        sessionUrl, 
+      res.json({
+        success: true,
+        sessionId,
+        sessionUrl,
         embedUrl,
         expiresAt
       });
@@ -593,7 +593,7 @@ async function createServer() {
     try {
       const payload = req.body || {};
       const sessionId = makeSessionId();
-      
+
       const sessionObj = {
         id: sessionId,
         createdAt: Date.now(),
@@ -603,7 +603,7 @@ async function createServer() {
         },
         status: 'pending'
       };
-      
+
       const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 3600);
       await setSession(sessionId, sessionObj, ttl);
 
@@ -612,9 +612,9 @@ async function createServer() {
       const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
 
       console.log("Created selfie liveness session:", sessionId);
-      res.json({ 
-        success: true, 
-        sessionId, 
+      res.json({
+        success: true,
+        sessionId,
         sessionUrl,
         expiresAt
       });
@@ -630,10 +630,10 @@ async function createServer() {
       const payload = req.body || {};
       const idSessionId = makeSessionId();
       const selfieSessionId = makeSessionId();
-      
+
       const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 3600);
       const origin = req.protocol + '://' + req.get('host');
-      
+
       // Create ID verification session with link to selfie session
       const idSessionObj = {
         id: idSessionId,
@@ -668,9 +668,9 @@ async function createServer() {
       const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
 
       console.log("Created combined verification session:", idSessionId, "->", selfieSessionId);
-      res.json({ 
-        success: true, 
-        sessionId: idSessionId, 
+      res.json({
+        success: true,
+        sessionId: idSessionId,
         selfieSessionId,
         sessionUrl,
         selfieSessionUrl,
@@ -743,7 +743,7 @@ async function createServer() {
         safePostWebhook(p.cancelWebhook, { sessionId: id, status: updated.status, result: updated.result });
       }
       if (['done', 'completed', 'success', 'cancelled', 'canceled', 'failed'].includes(status)) {
-        cleanupTempForSession(id, { deleteImageFromStorage }).catch(() => {});
+        cleanupTempForSession(id, { deleteImageFromStorage }).catch(() => { });
       }
 
       return res.json({ success: true, session: updated });
@@ -761,7 +761,7 @@ async function createServer() {
     try {
       const sess = await getSession(req.params.id);
       if (!sess) return res.status(404).json({ success: false, error: 'Session not found' });
-      
+
       const imageRef = sess.payload?.tempImageRef;
       const ocr = sess.payload?.tempOcr;
       const imageUrl = await getImageUrlFromRef(imageRef);
@@ -864,13 +864,13 @@ async function createServer() {
     try {
       const certPath = path.resolve(__dirname, sslCertPath);
       const keyPath = path.resolve(__dirname, sslKeyPath);
-      
+
       if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
         const sslOptions = {
           cert: fs.readFileSync(certPath),
           key: fs.readFileSync(keyPath),
         };
-        
+
         https.createServer(sslOptions, app).listen(sslPort, host, () => {
           console.log(`HTTPS server running at https://${host}:${sslPort}`);
         });

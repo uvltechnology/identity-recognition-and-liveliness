@@ -60,7 +60,7 @@ export default function Documentation() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
-      
+
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
         {/* Header */}
         <header className="mb-8">
@@ -97,7 +97,7 @@ export default function Documentation() {
         {/* Session Endpoints */}
         <section id="sessions" className="mb-10 scroll-mt-20">
           <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Create Verification Sessions</h2>
-          
+
           {/* Node.js Example */}
           <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
             <div className="flex items-center gap-2 mb-3">
@@ -130,7 +130,7 @@ async function createVerificationSession() {
 const embedUrl = await createVerificationSession();
 // Send embedUrl to your frontend to display in iframe`} />
           </div>
-          
+
           <EndpointCard
             method="POST"
             path="/api/verify/id/create"
@@ -190,6 +190,25 @@ const embedUrl = await createVerificationSession();
   "extractedData": { ... }
 }`}
           />
+
+          <EndpointCard
+            method="GET"
+            path="/api/ids"
+            description="Get the list of all supported ID types for verification."
+            responseBody={`{
+  "success": true,
+  "idTypes": [
+    { "id": "national-id", "name": "National ID" },
+    { "id": "passport", "name": "Passport" },
+    { "id": "umid", "name": "UMID" },
+    { "id": "driver-license", "name": "Driver's License" },
+    { "id": "tin-id", "name": "TIN ID" },
+    { "id": "philhealth", "name": "PhilHealth" },
+    { "id": "pagibig", "name": "Pag-IBIG" },
+    { "id": "postal-id", "name": "Postal ID" }
+  ]
+}`}
+          />
         </section>
 
         {/* Supported ID Types */}
@@ -217,7 +236,7 @@ const embedUrl = await createVerificationSession();
         {/* Embed Integration */}
         <section id="embed" className="mb-10 scroll-mt-20">
           <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Embed Integration</h2>
-          
+
           <div className="space-y-4">
             <div className="bg-white rounded-lg border border-gray-200 p-4">
               <h3 className="font-semibold text-gray-900 mb-3">Add iframe to your page</h3>

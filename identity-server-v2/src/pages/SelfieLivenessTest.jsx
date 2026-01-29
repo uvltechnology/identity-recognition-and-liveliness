@@ -53,6 +53,11 @@ export default function SelfieLivenessTest() {
   const [faceLandmarks, setFaceLandmarks] = useState(null);
   const [faceBox, setFaceBox] = useState(null);
   const overlayCanvasRef = useRef(null);
+  
+  // Consent & guide states
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [consentGiven, setConsentGiven] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
     return () => stopFaceDetection();
@@ -203,6 +208,46 @@ export default function SelfieLivenessTest() {
     centeredFrameCountRef.current = 0;
     setFaceDetectionStarted(false);
   }, []);
+
+  // Handle start button flow: show consent -> guide -> start
+  const handleStartClick = () => {
+    if (!consentGiven) {
+      setShowConsentModal(true);
+      setFaceFeedback('Please provide consent to begin');
+      setFaceFeedbackType('warning');
+      return;
+    }
+
+    if (!showGuide) {
+      setShowGuide(true);
+      return;
+    }
+
+    // If consent already given and guide shown (or dismissed), start
+    startFaceDetection();
+  };
+
+  const acceptConsent = () => {
+    setConsentGiven(true);
+    setShowConsentModal(false);
+    // show guide right after consent
+    setShowGuide(true);
+    setFaceFeedback('Consent accepted — showing quick guide');
+    setFaceFeedbackType('info');
+  };
+
+  const declineConsent = () => {
+    setConsentGiven(false);
+    setShowConsentModal(false);
+    setFaceFeedback('Consent is required to perform face verification');
+    setFaceFeedbackType('error');
+  };
+
+  const proceedFromGuide = () => {
+    setShowGuide(false);
+    // start detection after the guide
+    startFaceDetection();
+  };
 
   const isProcessingRef = useRef(false);
 
@@ -1019,7 +1064,7 @@ export default function SelfieLivenessTest() {
         {/* Button */}
         {!faceDetectionStarted && (
           <button
-            onClick={startFaceDetection}
+            onClick={handleStartClick}
             disabled={!modelsLoaded}
             className="w-full py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white font-bold text-lg rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed hover:from-blue-600 hover:to-blue-700 transition shadow-lg shadow-blue-500/30"
           >
@@ -1053,6 +1098,39 @@ export default function SelfieLivenessTest() {
           </div>
         )}
       </div>
+      
+      {/* Consent Modal */}
+      {showConsentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="max-w-md w-full bg-white rounded-2xl p-6">
+            <h2 className="text-lg font-bold mb-2">Consent to Face Scan</h2>
+            <p className="text-sm text-gray-700 mb-4">We will use your camera to capture a short live selfie to verify liveness. By accepting, you consent to temporary capture of an image for verification.</p>
+            <div className="flex gap-3 mt-4">
+              <button onClick={acceptConsent} className="flex-1 py-3 bg-blue-600 text-white rounded-xl">I Consent</button>
+              <button onClick={declineConsent} className="flex-1 py-3 bg-gray-200 rounded-xl">Decline</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Guide Overlay (shown after consent) */}
+      {showGuide && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/70 backdrop-blur-sm p-6">
+          <div role="dialog" aria-modal="true" className="max-w-lg w-full bg-white rounded-2xl p-6 shadow-2xl pointer-events-auto">
+            <h3 className="text-xl font-semibold mb-2">Quick Guide</h3>
+            <ul className="text-sm text-gray-700 space-y-2 mb-4">
+              <li>• Position your face in the center oval.</li>
+              <li>• Ensure good lighting and remove glasses if possible.</li>
+              <li>• Blink naturally when prompted; avoid sudden movements.</li>
+              <li>• Hold steady for a few seconds while we check liveness.</li>
+            </ul>
+            <div className="flex gap-3">
+              <button onClick={proceedFromGuide} className="flex-1 py-3 bg-green-600 text-white rounded-xl">Proceed to Scan</button>
+              <button onClick={() => setShowGuide(false)} className="flex-1 py-3 bg-gray-200 rounded-xl">Skip</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
