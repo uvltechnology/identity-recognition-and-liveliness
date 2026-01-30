@@ -19,7 +19,7 @@ const MAX_STATIC_FRAMES = 15;
 const HEAD_POSE_VARIANCE_MIN = 0.5;
 
 // Eye blink detection
-const EYE_BLINK_THRESHOLD = 0.22; // EAR below this = blink detected
+const EYE_BLINK_THRESHOLD = 0.25; // EAR below this = blink detected (higher = easier to detect)
 const REQUIRED_BLINKS = 1; // Must blink once for liveness
 const BLINK_COOLDOWN_FRAMES = 5; // Frames to wait between blink detections
 

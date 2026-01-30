@@ -23,7 +23,7 @@ const REQUIRED_CENTERED_FRAMES = 10;
 const MIN_FACE_CONFIDENCE = 0.5;
 const MIN_FACE_SIZE_RATIO = 0.25;
 const MAX_FACE_SIZE_RATIO = 0.55;
-const EYE_BLINK_THRESHOLD = 0.22; // EAR below this = blink detected
+const EYE_BLINK_THRESHOLD = 0.25; // EAR below this = blink detected (higher = easier to detect)
 const REQUIRED_BLINKS = 1; // Must blink once for liveness
 const BLINK_COOLDOWN_FRAMES = 5; // Frames to wait between blink detections
 const FACE_MATCH_THRESHOLD = 0.70;
@@ -546,11 +546,8 @@ export default function CombinedVerification() {
       setFaceBox(box);
       setFaceLandmarks(detection.landmarks);
       
-      if (livenessScore > 0) {
-        drawFaceLandmarks(detection.landmarks, box);
-      } else {
-        clearOverlayCanvas();
-      }
+      // Always draw face landmarks when face is detected
+      drawFaceLandmarks(detection.landmarks, box);
 
       // Check face size
       const faceHeightRatio = box.height / videoHeight;
@@ -1396,21 +1393,23 @@ export default function CombinedVerification() {
             style={{ transform: 'scaleX(-1)' }}
           />
           <canvas ref={faceCanvasRef} className="hidden" />
-          <canvas 
-            ref={overlayCanvasRef} 
-            className={`absolute inset-0 w-full h-full object-cover pointer-events-none ${!faceDetectionStarted ? 'hidden' : ''}`}
-            style={{ transform: 'scaleX(-1)' }}
-          />
 
           {faceDetectionStarted && livenessScore > 0 && (
             <div 
-              className="absolute inset-0 backdrop-blur-md bg-black/40 pointer-events-none"
+              className="absolute inset-0 backdrop-blur-md bg-black/40 pointer-events-none z-10"
               style={{
                 WebkitMaskImage: 'radial-gradient(ellipse 104px 144px at center, transparent 100%, black 100%)',
                 maskImage: 'radial-gradient(ellipse 104px 144px at center, transparent 100%, black 100%)',
               }}
             />
           )}
+
+          {/* Face landmarks overlay - always on top */}
+          <canvas 
+            ref={overlayCanvasRef} 
+            className={`absolute inset-0 w-full h-full object-cover pointer-events-none z-20 ${!faceDetectionStarted ? 'hidden' : ''}`}
+            style={{ transform: 'scaleX(-1)' }}
+          />
 
           {faceDetectionStarted && (
             <>
