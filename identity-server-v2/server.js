@@ -676,6 +676,9 @@ async function createServer() {
       const ttl = Number(payload.ttlSeconds || process.env.VERIFY_SESSION_TTL_SECONDS || 3600);
       const origin = req.protocol + '://' + req.get('host');
 
+      // Default compareFaces to true if not specified
+      const compareFaces = payload.compareFaces !== false;
+
       // Create ID verification session with link to selfie session
       const idSessionObj = {
         id: idSessionId,
@@ -686,6 +689,7 @@ async function createServer() {
           idType: payload.idType || 'national-id',
           nextStep: 'selfie',
           selfieSessionId: selfieSessionId,
+          compareFaces: compareFaces,
         },
         status: 'pending'
       };
@@ -699,6 +703,7 @@ async function createServer() {
           ...payload,
           verificationType: 'combined-selfie',
           linkedIdSession: idSessionId,
+          compareFaces: compareFaces,
         },
         status: 'pending'
       };

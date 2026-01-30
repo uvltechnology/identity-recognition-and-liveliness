@@ -384,6 +384,7 @@ async function createVerificationSession() {
     'https://identity.logica.dev/api/verify/combined/create',
     {
       idType: 'national-id',
+      compareFaces: true, // Set to false to skip face matching
       successUrl: 'https://yourapp.com/success',
       webhookUrl: 'https://yourapp.com/webhook'
     },
@@ -455,9 +456,10 @@ const embedUrl = await createVerificationSession();
             {
               method: 'POST',
               path: '/api/verify/combined/create',
-              description: 'Create a combined flow: ID verification → selfie liveness with face matching.',
+              description: 'Create a combined flow: ID verification → selfie liveness with optional face matching.',
               requestParams: [
                 { name: 'idType', type: 'string', required: true, description: 'Type of ID to verify (e.g., national-id, passport)' },
+                { name: 'compareFaces', type: 'boolean', required: false, description: 'Whether to compare selfie with ID photo (default: true). Set to false to skip face matching.' },
                 { name: 'successUrl', type: 'string', required: false, description: 'URL to redirect after successful verification' },
                 { name: 'failureUrl', type: 'string', required: false, description: 'URL to redirect after failed verification' },
                 { name: 'webhookUrl', type: 'string', required: false, description: 'URL to receive webhook notifications' },
@@ -471,6 +473,7 @@ const embedUrl = await createVerificationSession();
               ],
               requestBody: `{
   "idType": "national-id",
+  "compareFaces": true,
   "successUrl": "https://yourapp.com/callback",
   "webhookUrl": "https://yourapp.com/webhook"
 }`,
@@ -646,7 +649,12 @@ const embedUrl = await createVerificationSession();
                   <tr>
                     <td className="px-3 py-2"><code className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs">verification_success</code></td>
                     <td className="px-3 py-2"><code className="text-xs">success</code></td>
-                    <td className="px-3 py-2 text-gray-600">Verification completed successfully (final event)</td>
+                    <td className="px-3 py-2 text-gray-600">Verification completed successfully (sent automatically after capture)</td>
+                  </tr>
+                  <tr>
+                    <td className="px-3 py-2"><code className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs">verification_complete</code></td>
+                    <td className="px-3 py-2"><code className="text-xs">success</code></td>
+                    <td className="px-3 py-2 text-gray-600">User clicked "Done" button (includes full result data and images)</td>
                   </tr>
                   <tr>
                     <td className="px-3 py-2"><code className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs">verification_failed</code></td>
@@ -707,7 +715,7 @@ const embedUrl = await createVerificationSession();
   }
 }
 
-// Success payload (Combined Verification)
+// Success payload (Combined Verification - sent automatically after capture)
 {
   identityOCR: {
     action: 'verification_success',
@@ -716,13 +724,43 @@ const embedUrl = await createVerificationSession();
     verificationType: 'combined',
     result: {
       idData: { firstName, lastName, ... },
-      faceMatched: true,
-      faceSimilarity: 85,
+      faceComparisonPerformed: true,  // false if compareFaces was set to false
+      faceMatched: true,              // null if faceComparisonPerformed is false
+      faceSimilarity: 85,             // null if faceComparisonPerformed is false
       livenessScore: 100
     },
     images: {
       idImage: 'data:image/jpeg;base64,...',     // Captured ID
       selfieImage: 'data:image/jpeg;base64,...'  // Captured selfie
+    }
+  }
+}
+
+// Complete payload (Combined Verification - sent when user clicks "Done")
+// This is the recommended event to listen for as it indicates user has reviewed results
+{
+  identityOCR: {
+    action: 'verification_complete',
+    status: 'success',
+    session: 'sess_abc123',
+    verificationType: 'combined',
+    result: {
+      success: true,
+      fields: {
+        firstName: 'Juan',
+        lastName: 'Dela Cruz',
+        birthDate: '1990-01-15',
+        idType: 'national-id',
+        idNumber: '1234-5678-9012'
+      },
+      idData: { ... },                // Full extracted ID data
+      livenessScore: 100,
+      faceMatched: true,              // null if face comparison was skipped
+      faceSimilarity: 85              // null if face comparison was skipped
+    },
+    images: {
+      idImage: 'data:image/jpeg;base64,...',     // Captured ID image
+      selfieImage: 'data:image/jpeg;base64,...'  // Captured selfie image
     }
   }
 }
@@ -809,12 +847,37 @@ window.addEventListener('message', (event) => {
   
   switch (action) {
     case 'verification_success':
-      console.log('✅ Verification successful!');
+      // Sent automatically after successful capture
+      console.log('✅ Verification capture complete!');
       console.log('Session:', session);
       console.log('Type:', verificationType);
       console.log('Data:', result);
       
-      // Access captured images based on verification type
+      // Note: User may still be reviewing results in iframe
+      // Wait for 'verification_complete' if you want user confirmation
+      break;
+      
+    case 'verification_complete':
+      // Sent when user clicks "Done" button - RECOMMENDED to use this event
+      console.log('✅ User confirmed verification!');
+      console.log('Session:', session);
+      console.log('Type:', verificationType);
+      
+      // Access extracted fields
+      if (result?.fields) {
+        console.log('First Name:', result.fields.firstName);
+        console.log('Last Name:', result.fields.lastName);
+        console.log('Birth Date:', result.fields.birthDate);
+        console.log('ID Type:', result.fields.idType);
+        console.log('ID Number:', result.fields.idNumber);
+      }
+      
+      // Access liveness and face match results
+      console.log('Liveness Score:', result?.livenessScore);
+      console.log('Face Matched:', result?.faceMatched);
+      console.log('Face Similarity:', result?.faceSimilarity);
+      
+      // Access captured images
       if (images) {
         if (images.idImage) {
           console.log('ID Image captured');
@@ -828,7 +891,7 @@ window.addEventListener('message', (event) => {
         }
       }
       
-      // Close the iframe or redirect
+      // Close the iframe and show success
       document.getElementById('verification-iframe').remove();
       showSuccessMessage('Identity verified!');
       break;
@@ -875,7 +938,9 @@ function getErrorMessage(reason) {
             <h3 className="font-semibold text-blue-900 mb-2">💡 Best Practices</h3>
             <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
               <li>Always verify the event origin matches your expected domain</li>
-              <li>Handle all action types (success, failed, cancelled)</li>
+              <li>Handle all action types (success, complete, failed, cancelled)</li>
+              <li>Use <code className="bg-blue-100 px-1 rounded">verification_complete</code> for user-confirmed results (recommended)</li>
+              <li>Use <code className="bg-blue-100 px-1 rounded">verification_success</code> if you need immediate capture notification</li>
               <li>Provide clear user feedback for each state</li>
               <li>Use webhooks as backup for critical verification flows</li>
               <li>Store session IDs to correlate iframe events with server data</li>
