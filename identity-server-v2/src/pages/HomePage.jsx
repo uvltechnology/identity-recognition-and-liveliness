@@ -57,10 +57,7 @@ export default function HomePage() {
               {[
                 { path: '/api/health', desc: 'Health check' },
                 { path: '/api/ids', desc: 'List supported ID types' },
-                { path: '/api/ocr/base64', desc: 'OCR processing' },
-                { path: '/api/ai/:idType/parse', desc: 'AI field extraction' },
                 { path: '/api/session/:id', desc: 'Get session info' },
-                { path: '/embed/session/:id', desc: 'Embed verification' },
               ].map((item) => (
                 <li key={item.path} className="px-4 sm:px-6 py-2.5 sm:py-3 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
                   <code className="text-xs sm:text-sm bg-gray-100 px-2 py-0.5 rounded text-blue-600 font-mono whitespace-nowrap">{item.path}</code>

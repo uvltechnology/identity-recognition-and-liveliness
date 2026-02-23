@@ -93,9 +93,28 @@ async function createServer() {
   const app = express();
 
   // CORS and body parsing
-  app.use(cors());
+  // Restrict allowed origin for embed and iframe usage to configured expected origin (KYC compliance)
+  const expectedOrigin = process.env.IDENTITY_EXPECTED_ORIGIN || process.env.VITE_EXPECTED_ORIGIN || '';
+  if (expectedOrigin) {
+    app.use(cors({ origin: expectedOrigin, credentials: true }));
+  } else {
+    app.use(cors());
+  }
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+  // Security headers for KYC compliance: reduce attack surface and prevent data leakage
+  app.use((req, res, next) => {
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Permissions-Policy', "camera=(), microphone=(), geolocation=()");
+    // HSTS only when SSL is enabled
+    if (sslEnabled) {
+      res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+    }
+    next();
+  });
 
   // Serve static files from public directory
   app.use(express.static(path.join(__dirname, 'public')));

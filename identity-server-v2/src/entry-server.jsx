@@ -10,11 +10,21 @@ export function render(url, initialState = {}) {
   );
 
   // Inject initial state for client hydration
-  const head = `
+  let head = `
     <script>
-      window.__INITIAL_STATE__ = ${JSON.stringify(initialState).replace(/</g, '\\u003c')};
+      window.__INITIAL_STATE__ = ${JSON.stringify(initialState).replace(/</g, '\u003c')};
     </script>
   `;
+
+  // Inject expected origin for embeds (KYC: restrict parent origins)
+  const expectedOrigin = process.env.VITE_EXPECTED_ORIGIN || process.env.IDENTITY_EXPECTED_ORIGIN || '';
+  const originScript = `
+    <script>
+      window.__IDENTITY_EXPECTED_ORIGIN__ = ${JSON.stringify(expectedOrigin || '*')};
+    </script>
+  `;
+
+  head += originScript;
 
   return { html, head };
 }

@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 import fs from 'fs';
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode = process.env.NODE_ENV || 'development' }) => {
   const env = loadEnv(mode, process.cwd(), '');
   
   const host = env.HOST || 'localhost';
@@ -31,6 +31,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    define: {
+      // Expose the expected origin to the client via import.meta.env.VITE_EXPECTED_ORIGIN
+      __VITE_EXPECTED_ORIGIN__: JSON.stringify(env.VITE_EXPECTED_ORIGIN || env.IDENTITY_EXPECTED_ORIGIN || ''),
+    },
     resolve: {
       alias: {
         '@': resolve(__dirname, './src'),
