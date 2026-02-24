@@ -1,0 +1,7 @@
+---
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/thevifco/repositories/identity-server-v2
+    - /bin/cp -R * $DEPLOYPATH
+    - cd $DEPLOYPATH && npm install --production
+    - cd $DEPLOYPATH && npm run build
