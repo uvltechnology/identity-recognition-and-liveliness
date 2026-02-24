@@ -1,7 +1,7 @@
 ---
 deployment:
   tasks:
-    - cd /home/thevifco/repositories/identity-recognition-and-liveliness/identity-server-v2 && npm install --production
+    - cd /home/thevifco/repositories/identity-recognition-and-liveliness/identity-server-v2 && npm install
     - cd /home/thevifco/repositories/identity-recognition-and-liveliness/identity-server-v2 && npm run build
     - cp -r /home/thevifco/repositories/identity-recognition-and-liveliness/identity-server-v2/dist/client/* /home/thevifco/iscan.logicatechnology.com/
     - cp -r /home/thevifco/repositories/identity-recognition-and-liveliness/identity-server-v2/public/* /home/thevifco/iscan.logicatechnology.com/
