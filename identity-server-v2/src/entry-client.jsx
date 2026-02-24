@@ -1,5 +1,5 @@
 import './styles/globals.css';
-import { hydrateRoot } from 'react-dom/client';
+import { createRoot, hydrateRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 
@@ -14,9 +14,24 @@ try {
   window.__IDENTITY_EXPECTED_ORIGIN__ = window.__IDENTITY_EXPECTED_ORIGIN__ || '*';
 }
 
-hydrateRoot(
-  document.getElementById('app'),
-  <BrowserRouter>
-    <App initialState={initialState} />
-  </BrowserRouter>
-);
+const container = document.getElementById('app');
+
+// Check if there's server-rendered content (SSR) or just placeholder
+const hasServerContent = container && container.innerHTML && !container.innerHTML.includes('<!--app-html-->') && container.innerHTML.trim() !== '';
+
+if (hasServerContent) {
+  // SSR mode - hydrate existing content
+  hydrateRoot(
+    container,
+    <BrowserRouter>
+      <App initialState={initialState} />
+    </BrowserRouter>
+  );
+} else {
+  // Static/CSR mode - render fresh
+  createRoot(container).render(
+    <BrowserRouter>
+      <App initialState={initialState} />
+    </BrowserRouter>
+  );
+}
