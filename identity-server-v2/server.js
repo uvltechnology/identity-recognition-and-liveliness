@@ -92,6 +92,9 @@ async function safePostWebhook(url, body) {
 async function createServer() {
   const app = express();
 
+  // Trust proxy headers (X-Forwarded-Proto, etc.) for correct HTTPS detection behind reverse proxy
+  app.set('trust proxy', true);
+
   // CORS and body parsing
   // Allow all origins since this is a third-party embeddable app
   app.use(cors({ origin: true, credentials: true }));
