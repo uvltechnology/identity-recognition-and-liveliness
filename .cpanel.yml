@@ -1,0 +1,5 @@
+---
+deployment:
+  tasks:
+    - cd /home/thevifco/repositories/identity-recognition-and-liveliness/identity-server-v2 && npm install --production
+    - cd /home/thevifco/repositories/identity-recognition-and-liveliness/identity-server-v2 && npm run build
