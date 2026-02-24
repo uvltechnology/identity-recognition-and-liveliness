@@ -93,22 +93,19 @@ async function createServer() {
   const app = express();
 
   // CORS and body parsing
-  // Restrict allowed origin for embed and iframe usage to configured expected origin (KYC compliance)
-  const expectedOrigin = process.env.IDENTITY_EXPECTED_ORIGIN || process.env.VITE_EXPECTED_ORIGIN || '';
-  if (expectedOrigin) {
-    app.use(cors({ origin: expectedOrigin, credentials: true }));
-  } else {
-    app.use(cors());
-  }
+  // Allow all origins since this is a third-party embeddable app
+  app.use(cors({ origin: true, credentials: true }));
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
   // Security headers for KYC compliance: reduce attack surface and prevent data leakage
   app.use((req, res, next) => {
-    res.setHeader('X-Frame-Options', 'DENY');
+    // Allow iframe embedding from any origin
+    res.setHeader('Content-Security-Policy', "frame-ancestors *");
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Permissions-Policy', "camera=(), microphone=(), geolocation=()");
+    res.setHeader('Referrer-Policy', 'no-referrer-when-downgrade');
+    // Allow camera and microphone for identity verification
+    res.setHeader('Permissions-Policy', "camera=*, microphone=*, geolocation=*");
     // HSTS only when SSL is enabled
     if (sslEnabled) {
       res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
@@ -147,6 +144,20 @@ async function createServer() {
   });
 
   app.get('/health', (req, res) => res.json({ ok: true }));
+  // add route for package version
+  app.get('/api/version', (req, res) => {
+    try {
+      const pkgPath = path.join(__dirname, 'package.json');
+      if (!fs.existsSync(pkgPath)) {
+        return res.status(404).json({ success: false, error: 'package.json not found' });
+      }
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      return res.json({ success: true, name: pkg.name || null, version: pkg.version || null });
+    } catch (e) {
+      console.error('Failed to read package.json', e);
+      return res.status(500).json({ success: false, error: 'Failed to read package.json' });
+    }
+  });
 
   // ID types list
   app.get('/api/ids', (req, res) => {
