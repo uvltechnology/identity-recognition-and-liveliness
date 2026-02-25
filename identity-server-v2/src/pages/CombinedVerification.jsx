@@ -1385,7 +1385,7 @@ export default function CombinedVerification() {
                 </svg>
               </div>
               <h1 className="text-2xl font-bold text-gray-900">Verification Complete</h1>
-              <p className="text-gray-600 mt-1">Identity verified successfully</p>
+              <p className="text-gray-600 mt-1">Identity verified successfully.</p>
             </div>
 
             <div className="bg-white rounded-2xl shadow-xl overflow-hidden mb-6">
