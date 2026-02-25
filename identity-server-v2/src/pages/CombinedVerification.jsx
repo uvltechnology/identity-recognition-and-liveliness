@@ -166,12 +166,42 @@ export default function CombinedVerification() {
 
   // ===== PARENT NOTIFICATION =====
   const notifyParent = useCallback((message) => {
-    if (typeof window !== 'undefined' && window.parent !== window) {
+    if (typeof window === 'undefined') return;
+    const isEmbedded = window.parent !== window;
+    const hasOpener = !!window.opener;
+    console.log('[identity] notifyParent called', { isEmbedded, hasOpener, expectedOrigin, messageAction: message?.identityOCR?.action });
+
+    // Try window.parent (iframe embed)
+    if (isEmbedded) {
       try {
         window.parent.postMessage(message, expectedOrigin);
+        console.log('[identity] postMessage sent to parent with origin:', expectedOrigin);
       } catch (e) {
-        console.warn('[identity] postMessage failed', e);
+        console.error('[identity] postMessage to parent failed with expectedOrigin', e);
       }
+      // Also try with '*' as fallback if expectedOrigin is specific (CORS safety net)
+      if (expectedOrigin !== '*') {
+        try {
+          window.parent.postMessage(message, '*');
+          console.log('[identity] postMessage sent to parent with wildcard origin');
+        } catch (e2) {
+          console.error('[identity] postMessage to parent with * also failed', e2);
+        }
+      }
+    }
+
+    // Try window.opener (popup flows)
+    if (hasOpener) {
+      try {
+        window.opener.postMessage(message, '*');
+        console.log('[identity] postMessage sent to opener');
+      } catch (e) {
+        console.error('[identity] postMessage to opener failed', e);
+      }
+    }
+
+    if (!isEmbedded && !hasOpener) {
+      console.warn('[identity] Not embedded in iframe and no opener — postMessage has no target. Message:', message);
     }
   }, [expectedOrigin]);
 
@@ -763,23 +793,34 @@ export default function CombinedVerification() {
         }),
       });
 
-      // Send verification_success
-      notifyParent({
-        identityOCR: {
-          action: 'verification_success',
-          status: 'success',
-          result: result,
-          session: sessionId,
-          images: {
-            idImage: capturedImage,
-            selfieImage: imageDataUrl,
-          },
-          verificationType: 'combined',
-        },
+      // Send verification_success (auto-send after face verification)
+      console.log('[identity] Auto-sending verification_success after face verification', {
+        sessionId,
+        hasIdImage: !!capturedImage,
+        hasSelfieImage: !!imageDataUrl,
+        isEmbedded: window.parent !== window,
+        expectedOrigin,
       });
+      try {
+        notifyParent({
+          identityOCR: {
+            action: 'verification_success',
+            status: 'success',
+            result: result,
+            session: sessionId,
+            images: {
+              idImage: capturedImage,
+              selfieImage: imageDataUrl,
+            },
+            verificationType: 'combined',
+          },
+        });
+      } catch (postErr) {
+        console.error('[identity] Auto-send verification_success failed', postErr);
+      }
 
     } catch (err) {
-      console.error('Face verification error:', err);
+      console.error('[identity] Face verification error:', err);
       setFaceFeedback('⚠️ Verification failed, try again');
       setFaceFeedbackType('error');
       notifyParentFailed('selfie_error', { error: err.message });
@@ -833,33 +874,64 @@ export default function CombinedVerification() {
   };
 
   const handleDone = () => {
-    // Send complete verification data including images and extracted fields
-    notifyParent({
+    // Build the full verification payload (same shape as the auto-send on verification success)
+    const result = {
+      success: true,
+      action: 'success',
+      fields: {
+        firstName: aiResult?.data?.firstName || aiResult?.data?.first_name || '',
+        lastName: aiResult?.data?.lastName || aiResult?.data?.last_name || '',
+        birthDate: aiResult?.data?.birthDate || aiResult?.data?.birth_date || aiResult?.data?.dateOfBirth || '',
+        idType: selectedIdType || aiResult?.data?.idType || '',
+        idNumber: aiResult?.data?.idNumber || aiResult?.data?.id_number || '',
+      },
+      idData: aiResult?.data || {},
+      idImage: capturedImage,
+      selfieImage: capturedFace,
+      livenessScore: livenessScore || 100,
+      faceComparisonPerformed: !!faceMatchResult,
+      faceMatched: faceMatchResult?.matched ?? null,
+      faceSimilarity: faceMatchResult?.similarity ?? null,
+      timestamp: new Date().toISOString(),
+      sessionId: sessionId,
+    };
+
+    const payload = {
       identityOCR: {
-        action: 'verification_complete',
+        action: 'verification_success',
         status: 'success',
         session: sessionId,
-        result: {
-          success: true,
-          fields: {
-            firstName: aiResult?.data?.firstName || aiResult?.data?.first_name || '',
-            lastName: aiResult?.data?.lastName || aiResult?.data?.last_name || '',
-            birthDate: aiResult?.data?.birthDate || aiResult?.data?.birth_date || aiResult?.data?.dateOfBirth || '',
-            idType: selectedIdType || aiResult?.data?.idType || '',
-            idNumber: aiResult?.data?.idNumber || aiResult?.data?.id_number || '',
-          },
-          idData: aiResult?.data || {},
-          livenessScore: livenessScore,
-          faceMatched: faceMatchResult?.matched ?? null,
-          faceSimilarity: faceMatchResult?.similarity ?? null,
-        },
+        result: result,
         images: {
           idImage: capturedImage,
           selfieImage: capturedFace,
         },
         verificationType: 'combined',
       },
+    };
+
+    console.log('[identity] handleDone clicked — sending verification_success', {
+      sessionId,
+      hasIdImage: !!capturedImage,
+      hasSelfieImage: !!capturedFace,
+      fields: result.fields,
     });
+
+    try {
+      notifyParent(payload);
+    } catch (err) {
+      console.error('[identity] handleDone notifyParent threw', err);
+    }
+
+    // Direct fallback: also try postMessage with '*' regardless of notifyParent logic
+    try {
+      if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
+        window.parent.postMessage(payload, '*');
+        console.log('[identity] handleDone direct fallback postMessage sent to parent');
+      }
+    } catch (err) {
+      console.error('[identity] handleDone direct fallback postMessage failed', err);
+    }
   };
 
   const renderField = (label, value) => {
