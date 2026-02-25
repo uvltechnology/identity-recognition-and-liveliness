@@ -86,6 +86,9 @@ export default function CombinedVerification() {
   const [selfieSessionId, setSelfieSessionId] = useState(null);
   const [faceMismatch, setFaceMismatch] = useState(false);
   const [faceMismatchDetails, setFaceMismatchDetails] = useState(null);
+  const [spoofDetected, setSpoofDetected] = useState(false);
+  const [spoofDetails, setSpoofDetails] = useState(null);
+  const [isVerifyingLiveness, setIsVerifyingLiveness] = useState(false);
 
   // ===== FETCH SESSION =====
   useEffect(() => {
@@ -742,11 +745,57 @@ export default function CombinedVerification() {
         console.log('Face comparison skipped (compareFaces=false)');
       }
 
+      // Server-side AI Liveness/Anti-Spoofing Check
+      setFaceFeedback('🔍 Verifying liveness with AI...');
+      setFaceFeedbackType('info');
+      setIsVerifyingLiveness(true);
+
+      let aiLivenessResult = null;
+      try {
+        const livenessResponse = await fetch('/api/ai/face/liveness', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image: imageDataUrl,
+            livenessScore: livenessScore,
+            movementDetected: blinkCountRef.current > 0,
+          }),
+        });
+        aiLivenessResult = await livenessResponse.json();
+        console.log('[identity] AI Liveness check result:', aiLivenessResult);
+      } catch (livenessErr) {
+        console.error('[identity] AI Liveness check failed:', livenessErr);
+        // Continue without AI check if server is unavailable
+        aiLivenessResult = { isLive: true, confidence: livenessScore, reason: 'Server unavailable, using local check' };
+      } finally {
+        setIsVerifyingLiveness(false);
+      }
+
+      // Check if AI detected spoofing
+      if (aiLivenessResult && aiLivenessResult.isLive === false) {
+        setSpoofDetected(true);
+        setSpoofDetails({
+          confidence: aiLivenessResult.confidence,
+          reason: aiLivenessResult.reason || 'Spoofing detected by AI',
+          details: aiLivenessResult.details,
+        });
+        setCapturedFace(imageDataUrl);
+        setFaceFeedback(`❌ ${aiLivenessResult.reason || 'Spoofing detected - not a live person'}`);
+        setFaceFeedbackType('error');
+        stopFaceDetection();
+        notifyParentFailed('spoof_detected', {
+          confidence: aiLivenessResult.confidence,
+          reason: aiLivenessResult.reason,
+        });
+        return;
+      }
+
+      const finalLivenessScore = aiLivenessResult?.confidence || livenessScore || 100;
       setCapturedFace(imageDataUrl);
       setFaceVerified(true);
       setFaceFeedback('✅ Verified! Real human confirmed');
       setFaceFeedbackType('success');
-      setLivenessScore(100);
+      setLivenessScore(finalLivenessScore);
       stopFaceDetection();
 
       // Save final result
@@ -755,7 +804,9 @@ export default function CombinedVerification() {
         idData: aiResult?.data || {},
         idImage: capturedImage,
         selfieImage: imageDataUrl,
-        livenessScore: 100,
+        livenessScore: finalLivenessScore,
+        aiLivenessVerified: aiLivenessResult?.isLive === true,
+        aiLivenessReason: aiLivenessResult?.reason,
         faceComparisonPerformed: shouldCompareFaces,
         faceMatched: faceMatched?.matched ?? null,
         faceSimilarity: faceMatched?.similarity ?? null,
@@ -772,7 +823,8 @@ export default function CombinedVerification() {
             status: 'done',
             result: {
               capturedImageBase64: imageDataUrl,
-              livenessScore: 100,
+              livenessScore: finalLivenessScore,
+              aiLivenessVerified: aiLivenessResult?.isLive === true,
               faceComparisonPerformed: shouldCompareFaces,
               faceMatched: faceMatched?.matched ?? null,
               faceSimilarity: faceMatched?.similarity ?? null,
@@ -860,6 +912,8 @@ export default function CombinedVerification() {
   const handleRetryFace = () => {
     setFaceMismatch(false);
     setFaceMismatchDetails(null);
+    setSpoofDetected(false);
+    setSpoofDetails(null);
     setCapturedFace(null);
     setFaceVerified(false);
     setFaceFeedback('Press Start to try again');
@@ -1352,6 +1406,95 @@ export default function CombinedVerification() {
                     • Use better lighting for the selfie<br/>
                     • Position your face similar to the ID photo<br/>
                     • Remove glasses or accessories if different from ID
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={handleRetryFace}
+              className="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Try Again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ===== SPOOFING DETECTED VIEW =====
+  if (currentStep === 'selfie' && spoofDetected && capturedFace) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-100 flex flex-col">
+        <div className="bg-white shadow-sm sticky top-0 z-10">
+          <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-center">
+            <h1 className="font-semibold text-gray-900">Liveness Check Failed</h1>
+          </div>
+        </div>
+
+        <div className="flex-1 flex flex-col items-center justify-center p-6">
+          <div className="w-full max-w-md">
+            <div className="text-center mb-6">
+              <div className="w-20 h-20 mx-auto bg-red-500 rounded-full flex items-center justify-center mb-4 shadow-lg">
+                <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <h1 className="text-2xl font-bold text-gray-900">Spoofing Detected</h1>
+              <p className="text-gray-600 mt-2">The AI detected that this may not be a live person</p>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-xl p-4 mb-6">
+              <div className="text-center mb-4">
+                <div className="text-xs text-gray-500 mb-2">Captured Image</div>
+                <img
+                  src={capturedFace}
+                  alt="Captured"
+                  className="w-40 h-40 mx-auto object-cover rounded-lg border-2 border-red-300"
+                />
+              </div>
+              
+              {spoofDetails && (
+                <div className="border-t border-gray-100 pt-3">
+                  <div className="flex justify-between items-center text-sm mb-2">
+                    <span className="text-gray-500">AI Confidence</span>
+                    <span className="font-semibold text-red-600">
+                      {spoofDetails.confidence || 0}%
+                    </span>
+                  </div>
+                  {spoofDetails.reason && (
+                    <div className="mt-2 text-sm text-gray-700 bg-red-50 p-3 rounded-lg">
+                      <span className="font-medium">Reason: </span>{spoofDetails.reason}
+                    </div>
+                  )}
+                  {spoofDetails.details && (
+                    <div className="mt-2 text-xs text-gray-600">
+                      {spoofDetails.details}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
+              <div className="flex gap-3">
+                <div className="text-amber-500 flex-shrink-0">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="font-semibold text-amber-800 text-sm">Requirements for verification:</div>
+                  <div className="text-amber-700 text-xs mt-1">
+                    • Use a real camera, not a photo or video<br/>
+                    • Ensure good lighting on your face<br/>
+                    • Remove any face masks or coverings<br/>
+                    • Look directly at the camera<br/>
+                    • Blink naturally during verification
                   </div>
                 </div>
               </div>
