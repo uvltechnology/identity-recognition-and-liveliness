@@ -5461,12 +5461,37 @@ function CombinedVerification() {
     }
   };
   const notifyParent = useCallback((message) => {
-    if (typeof window !== "undefined" && window.parent !== window) {
+    var _a;
+    if (typeof window === "undefined") return;
+    const isEmbedded = window.parent !== window;
+    const hasOpener = !!window.opener;
+    console.log("[identity] notifyParent called", { isEmbedded, hasOpener, expectedOrigin, messageAction: (_a = message == null ? void 0 : message.identityOCR) == null ? void 0 : _a.action });
+    if (isEmbedded) {
       try {
         window.parent.postMessage(message, expectedOrigin);
+        console.log("[identity] postMessage sent to parent with origin:", expectedOrigin);
       } catch (e) {
-        console.warn("[identity] postMessage failed", e);
+        console.error("[identity] postMessage to parent failed with expectedOrigin", e);
       }
+      if (expectedOrigin !== "*") {
+        try {
+          window.parent.postMessage(message, "*");
+          console.log("[identity] postMessage sent to parent with wildcard origin");
+        } catch (e2) {
+          console.error("[identity] postMessage to parent with * also failed", e2);
+        }
+      }
+    }
+    if (hasOpener) {
+      try {
+        window.opener.postMessage(message, "*");
+        console.log("[identity] postMessage sent to opener");
+      } catch (e) {
+        console.error("[identity] postMessage to opener failed", e);
+      }
+    }
+    if (!isEmbedded && !hasOpener) {
+      console.warn("[identity] Not embedded in iframe and no opener — postMessage has no target. Message:", message);
     }
   }, [expectedOrigin]);
   const notifyParentFailed = useCallback(async (reason, details = {}) => {
@@ -6019,21 +6044,32 @@ function CombinedVerification() {
           finishedAt: (/* @__PURE__ */ new Date()).toISOString()
         })
       });
-      notifyParent({
-        identityOCR: {
-          action: "verification_success",
-          status: "success",
-          result,
-          session: sessionId,
-          images: {
-            idImage: capturedImage,
-            selfieImage: imageDataUrl
-          },
-          verificationType: "combined"
-        }
+      console.log("[identity] Auto-sending verification_success after face verification", {
+        sessionId,
+        hasIdImage: !!capturedImage,
+        hasSelfieImage: !!imageDataUrl,
+        isEmbedded: window.parent !== window,
+        expectedOrigin
       });
+      try {
+        notifyParent({
+          identityOCR: {
+            action: "verification_success",
+            status: "success",
+            result,
+            session: sessionId,
+            images: {
+              idImage: capturedImage,
+              selfieImage: imageDataUrl
+            },
+            verificationType: "combined"
+          }
+        });
+      } catch (postErr) {
+        console.error("[identity] Auto-send verification_success failed", postErr);
+      }
     } catch (err) {
-      console.error("Face verification error:", err);
+      console.error("[identity] Face verification error:", err);
       setFaceFeedback("⚠️ Verification failed, try again");
       setFaceFeedbackType("error");
       notifyParentFailed("selfie_error", { error: err.message });
@@ -6074,32 +6110,58 @@ function CombinedVerification() {
   };
   const handleDone = () => {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
-    notifyParent({
+    const result = {
+      success: true,
+      action: "success",
+      fields: {
+        firstName: ((_a = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _a.firstName) || ((_b = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _b.first_name) || "",
+        lastName: ((_c = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _c.lastName) || ((_d = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _d.last_name) || "",
+        birthDate: ((_e = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _e.birthDate) || ((_f = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _f.birth_date) || ((_g = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _g.dateOfBirth) || "",
+        idType: selectedIdType || ((_h = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _h.idType) || "",
+        idNumber: ((_i = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _i.idNumber) || ((_j = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _j.id_number) || ""
+      },
+      idData: (aiResult == null ? void 0 : aiResult.data) || {},
+      idImage: capturedImage,
+      selfieImage: capturedFace,
+      livenessScore: livenessScore || 100,
+      faceComparisonPerformed: !!faceMatchResult,
+      faceMatched: (faceMatchResult == null ? void 0 : faceMatchResult.matched) ?? null,
+      faceSimilarity: (faceMatchResult == null ? void 0 : faceMatchResult.similarity) ?? null,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      sessionId
+    };
+    const payload = {
       identityOCR: {
-        action: "verification_complete",
+        action: "verification_success",
         status: "success",
         session: sessionId,
-        result: {
-          success: true,
-          fields: {
-            firstName: ((_a = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _a.firstName) || ((_b = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _b.first_name) || "",
-            lastName: ((_c = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _c.lastName) || ((_d = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _d.last_name) || "",
-            birthDate: ((_e = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _e.birthDate) || ((_f = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _f.birth_date) || ((_g = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _g.dateOfBirth) || "",
-            idType: selectedIdType || ((_h = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _h.idType) || "",
-            idNumber: ((_i = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _i.idNumber) || ((_j = aiResult == null ? void 0 : aiResult.data) == null ? void 0 : _j.id_number) || ""
-          },
-          idData: (aiResult == null ? void 0 : aiResult.data) || {},
-          livenessScore,
-          faceMatched: (faceMatchResult == null ? void 0 : faceMatchResult.matched) ?? null,
-          faceSimilarity: (faceMatchResult == null ? void 0 : faceMatchResult.similarity) ?? null
-        },
+        result,
         images: {
           idImage: capturedImage,
           selfieImage: capturedFace
         },
         verificationType: "combined"
       }
+    };
+    console.log("[identity] handleDone clicked — sending verification_success", {
+      sessionId,
+      hasIdImage: !!capturedImage,
+      hasSelfieImage: !!capturedFace,
+      fields: result.fields
     });
+    try {
+      notifyParent(payload);
+    } catch (err) {
+      console.error("[identity] handleDone notifyParent threw", err);
+    }
+    try {
+      if (typeof window !== "undefined" && window.parent && window.parent !== window) {
+        window.parent.postMessage(payload, "*");
+        console.log("[identity] handleDone direct fallback postMessage sent to parent");
+      }
+    } catch (err) {
+      console.error("[identity] handleDone direct fallback postMessage failed", err);
+    }
   };
   const renderField = (label, value) => {
     if (!value) return null;
@@ -6436,7 +6498,7 @@ function CombinedVerification() {
       /* @__PURE__ */ jsxs("div", { className: "text-center mb-6", children: [
         /* @__PURE__ */ jsx("div", { className: "w-20 h-20 mx-auto bg-green-500 rounded-full flex items-center justify-center mb-4 shadow-lg", children: /* @__PURE__ */ jsx("svg", { className: "w-10 h-10 text-white", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: 3, d: "M5 13l4 4L19 7" }) }) }),
         /* @__PURE__ */ jsx("h1", { className: "text-2xl font-bold text-gray-900", children: "Verification Complete" }),
-        /* @__PURE__ */ jsx("p", { className: "text-gray-600 mt-1", children: "Identity verified successfully" })
+        /* @__PURE__ */ jsx("p", { className: "text-gray-600 mt-1", children: "Identity verified successfully." })
       ] }),
       /* @__PURE__ */ jsx("div", { className: "bg-white rounded-2xl shadow-xl overflow-hidden mb-6", children: /* @__PURE__ */ jsxs("div", { className: "p-4", children: [
         /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-green-600 mb-3", children: [
